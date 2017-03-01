@@ -4,16 +4,23 @@ var fs = require('fs');
 var request = require('request');
 var cheerio = require('cheerio');
 var stemmer = require('porter-stemmer').stemmer;
-var level = require('level-rocksdb')
+var levelup = require('level');
 var app     = express();
+
+// Database Configuration
+
+// Create our database, supply location and options.
+// This will create or open the underlying LevelDB store.
+var db = levelup('./mydb')
+console.log('Database created at /mydb.');
 
 app.get('/', function(req, res){
 	res.sendFile(path.join(__dirname + '/public/index.html'));
 });
 
 app.get('/scrape', function(req, res){
-	// res.send('Check the console for results.');
-	res.sendFile(path.join(__dirname + '/README.html'));
+	res.send('Check the console for results.');
+	// res.sendFile(path.join(__dirname + '/README.html'));
 
 	// The URL we will scrape from
     url = 'http://www.cse.ust.hk';
@@ -78,6 +85,18 @@ app.get('/scrape', function(req, res){
 				return filtered;
 			}
 
+			function wordFreq(arr) {
+				var freqMap = {};
+				arr.forEach(function(w) {
+					if (!freqMap[w]) {
+						freqMap[w] = 0;
+					}
+					freqMap[w] += 1;
+				});
+
+				return freqMap;
+			}
+
 			console.log('Words in '+url+':');
 			var words = removeStopwords(collectWords($));
 			console.log(words.join(' '));
@@ -93,30 +112,32 @@ app.get('/scrape', function(req, res){
 				console.log(data);
 			});
 
+			// Write stemmed words to txt
+			var stemmed = stemify(words);
+			// fs.writeFile('stemmed.txt', stemmed.join(' '), function(err){
+			//     console.log('File successfully written! - Check your project directory for the stemmed.txt file');
+			// });
 
-			fs.writeFile('stemmed.txt', stemify(words).join(' '), function(err){
-			    console.log('File successfully written! - Check your project directory for the stemmed.txt file');
-			})
+			// Convert stemmed words to freq table
+			var freqTable = wordFreq(stemmed);
+
+			// Add table records to db
+			for(var key in freqTable) {
+				db.put(key, freqTable[key], function (err) {
+  					if (err) return console.log('Ooops!', err)
+				});
+			};
+
+			console.log(db);
         }
     })
 });
 
 app.get('/db', function(req, res){
-	// 1) Create our database, supply location and options.
-	//    This will create or open the underlying LevelDB store.
-	var db = level('./mydb');
-
-	// 2) put a key & value
-	db.put('name', 'Level', function (err) {
-	  if (err) return console.log('Ooops!', err) // some kind of I/O error
-
-	  // 3) fetch by key
-		db.get('name', function (err, value) {
-		    if (err) return console.log('Ooops!', err) // likely the key was not found
-
-		    // ta da!
-		console.log('name=' + value)
-		})
+	res.send('The database contents.');
+	var stream = db.createReadStream();
+	stream.on('data', function(data) {  
+		console.log('%s = %j', data.key, data.value);
 	});
 });
 
