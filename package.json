@@ -11,7 +11,8 @@
   "dependencies": {
     "cheerio": "latest",
     "express": "latest",
-    "jshashtable": "^0.1.0",
+    "level": "^1.6.0",
+    "porter-stemmer": "^0.9.1",
     "request": "latest"
   },
   "license": "MIT"
