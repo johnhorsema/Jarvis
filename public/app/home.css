@@ -1,0 +1,53 @@
+body { padding-top: 100px; }
+.text-center {
+	text-align: center;
+}
+.navbar-input {
+	padding: 11px 16px;
+	border-radius: 2px 0 0 2px;
+	border: 0 none;
+	outline: 0 none;
+	font-size: 15px;
+	box-shadow: 1px 1px 5px #a1a1a1;
+}
+
+.navbar-input:focus {
+	box-shadow: 1px 1px 15px #b9b9b9;
+}
+
+.navbar-button {
+	background-color: #40c4ff;
+	border: 1px solid #40c4ff;
+	border-radius: 0 2px 2px 0;
+	color: #565656;
+	padding: 10px 0;
+	height: 43px;
+	cursor: pointer;
+	outline: none;
+}
+
+.navbar-button:focus {
+	background-color: #3bb3e8;
+	border-color: #3bb3e8;
+}
+
+.jarvis-container {
+	margin: 0;
+	width: 100%;
+	position: relative;
+	height: 125px;
+	top: 0;
+}
+
+.jarvis {
+	background-position: center;
+
+	background-repeat: no-repeat;
+	height: 100%;
+	z-index: 9999;
+	background-image: url(https://material.io/icons/webcomponents/custom_components/material-io-nav/static/images/icons_light.svg);
+}
+
+.jarvis-text {
+	color: #2979ff;
+}

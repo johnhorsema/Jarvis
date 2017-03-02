@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+
+<html lang="en" ng-app="myApp">
+    <meta charset="UTF-8">
+    <base href="/">
+    <head>
+        <title ng-bind="'JARVIS - '+title">JARVIS</title>
+
+        <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+        <link rel="shortcut icon" href="/static/favicon.ico" type="image/x-icon">
+        <link rel="stylesheet" href="//maxcdn.bootstrapcdn.com/bootstrap/3.3.1/css/bootstrap.min.css">
+    </head>
+
+    <body>
+        <div class="container" ng-view></div>
+    </body>
+
+    <script src="//cdnjs.cloudflare.com/ajax/libs/angular.js/1.6.1/angular.min.js"></script>
+    <script src="//cdnjs.cloudflare.com/ajax/libs/angular.js/1.6.1/angular-route.min.js"></script>
+    <script src="//cdnjs.cloudflare.com/ajax/libs/angular.js/1.6.1/angular-animate.min.js"></script>
+    <script type='text/javascript' src="/static/app/app.js" charset="UTF-8"></script>
+
+</html>

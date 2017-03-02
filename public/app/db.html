@@ -1,0 +1,40 @@
+<div ng-show="!ctrl.loaded" class="fade">
+	<div class="row loadicon">
+		<div class="loader">Loading...</div>
+	</div>
+	<div class="overlay"></div>
+</div>
+<div ng-show="ctrl.loaded">
+	<div ng-show="ctrl.dataLength>0">
+		<h2 ng-bind="ctrl.welcomeMsg"></h2>
+		<h4>Below shows the database entries:</h4>
+		<table class="table table-responsive">
+		  <thead>
+		    <tr>
+		      <th>Key</th>
+		      <th>Value(s)</th>
+		    </tr>
+		  </thead>
+		  <tbody>
+		    <tr ng-repeat="(key, value) in ctrl.data">
+		      <td ng-bind="key"></td>
+		      <td>
+		      	<span ng-repeat="val in value">{{val}}<br></span>
+		      </td>
+		    </tr>
+		  </tbody>
+		</table>
+	</div>
+	<div ng-show="ctrl.dataLength==0">
+		<div class="row loadicon">
+			No Data Available
+		</div>
+		<div class="row">
+			<div class="col-xs-4"></div>
+			<a class="col-xs-4 btn btn-md btn-primary" href="./scrape">Start scraping</a>
+		</div>
+		<div class="overlay"></div>
+	</div>
+</div>
+
+<link rel="stylesheet" href="/static/app/db.css">
