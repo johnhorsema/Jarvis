@@ -7,21 +7,83 @@ var stemmer = require('porter-stemmer').stemmer;
 var levelup = require('level');
 var app     = express();
 
-let URL_LIMIT = 14;
+let URL_LIMIT = 4;
+let DEPTH_LIMIT = 1;
 
+// URL_LIMIT, Pages Scraped
 // 2, 16
-// 4, 18
-// 8, 29
-// 14, 278
-// 16, 61
+// 4, 19
+// 8, 32
+// 10, 254
+// 12, 273
+// 14, 265
+// 16, 272
 // 32, 843
 
 // Database Configuration
 
 // Create our database, supply location and options.
 // This will create or open the underlying LevelDB store.
-var db = levelup('./mydb')
+var mydb = levelup('./mydb')
 console.log('Database created at /mydb.');
+
+// Define the hashtable interface
+// update(): append values for existing kv-pairs, create if not exist
+// getAll(): return all kv-pairs
+var HashTable = function(options) {
+	var db = options.db;
+	var hashtable = {};
+	hashtable.replace = function(key, inputVal) {
+		db.put(key, inputVal, function (err) {
+			if (err) console.log('Db IO Error!', err);
+		});
+	};
+	hashtable.update = function(key, inputVal) {
+		// Check if key exists in db
+		var exist = true;
+		db.get(key, function (err, value) {
+			if(err){
+				exist = !err.notFound;
+			}
+			// If exist
+			if(exist) {
+				// add new record with same key but updated value
+				var current = value.split(',');
+				db.put(key, current.concat(inputVal), function (err) {
+					if (err) console.log('Db IO Error!', err);
+				});
+			}
+			else {
+				// If not exist,
+				// Put new record
+				hashtable.replace(key, inputVal);
+			}
+		});
+	};
+	hashtable.getAll = function(options) {
+		// Method to 
+		// 1. transform value(s) only when the key is not excluded
+		// 2. return all kv-pairs
+		var transformValFunc = options.transformValFunc;
+		var excludeKey = options.excludeKey;
+		var res = options.res;
+		var instance = {};
+		var stream = db.createReadStream();
+		stream.on('data', function(data) {
+			instance[data.key] = data.value;
+			// if not excluded (=included), transform the value
+			if(excludeKey.indexOf(data.key)==-1){
+				instance[data.key] = transformValFunc(data.value);
+			}
+		});
+		stream.on('end', function() {
+			res.json(instance);
+		});
+	};
+	return hashtable;
+} 
+
+var dbInterface = HashTable({db: mydb});
 
 app.use('/static', express.static(__dirname + '/public'));
 
@@ -37,9 +99,15 @@ app.get('/scrape', function(req, res){
 	res.send('Check the console for results.');
 	// res.sendFile(path.join(__dirname + '/README.html'));
 
-    function makeRequest(url, count, urlCollection){
-    	if(urlCollection.length>URL_LIMIT) return;
-    	if(urlCollection.indexOf(url)!=-1) return;
+    function makeRequest(url, depth, visited){
+    	// Return if depth exceeded limit
+    	if(depth>DEPTH_LIMIT) return;
+
+    	// Return if visited exceeded limit
+    	if(visited.length>URL_LIMIT) return;
+
+    	// Normalize URL (remove trailing slash)
+    	url = url.replace(/\/$/, "");
 
     	console.log('Start scraping: '+url);
 
@@ -156,41 +224,19 @@ app.get('/scrape', function(req, res){
 
 				// Add table records to db
 				Object.keys(freqTable).forEach(function(key) {
-					// Check if key exists in db
-					var exist = true;
-					db.get(key, function (err, value) {
-						if(err){
-							exist = !err.notFound;
-						}
-						// If exist
-						if(exist) {
-							// add new record with same key but updated value
-							var current = value.split(',');
-							db.put(key, current.concat([freqTable[key], url]), function (err) {
-								if (err) console.log('Db IO Error!', err);
-							});
-						}
-						else {
-							// If not exist,
-							// Add new record
-							db.put(key, [freqTable[key], url], function (err) {
-								if (err) console.log('Db IO Error!', err);
-							});
-						}
-					});
+					dbInterface.update(key, [freqTable[key], url]);
 				});
 
-				console.log('Done Scraping: '+url+'('+count+')');
-				urlCollection.push(url);
-				db.put('url_size', urlCollection.length, function (err) {
-					if (err) console.log('Db IO Error!', err);
-				});
+				console.log('Done Scraping: '+url+'(level: '+depth+')');
+				visited.push(url);
+				dbInterface.replace('URL_COLLECTION_LENGTH',visited.length);
 
-				if(links[1] && urlCollection.length<URL_LIMIT+1){
-					links[1].forEach(function(link, idx){
-						count++;
-			    		makeRequest(link, count, urlCollection);
-					});
+				if(visited.length<=URL_LIMIT){
+					if(links[1]){
+						links[1].forEach(function(link){
+				    		makeRequest(link, depth+1, visited);
+						});
+					}
 				}
 	        }
 	    });
@@ -203,7 +249,7 @@ app.get('/scrape', function(req, res){
 });
 
 app.get('/db', function(req, res){
-	function stringToArray(s) {
+	var stringToArr = function(s) {
 		var res = [];
 		var arr = s.split(',');
 		for(var i=0; i<arr.length; i+=2) {
@@ -213,17 +259,11 @@ app.get('/db', function(req, res){
 			res.push(subarr);
 		}
 		return res;
-	}
-	var instance = {};
-	var stream = db.createReadStream();
-	stream.on('data', function(data) {
-		instance[data.key] = stringToArray(data.value);
-		if(data.key=='url_size'){
-			instance[data.key] = data.value;
-		}
-	});
-	stream.on('end', function() {
-		res.json(instance);
+	};
+	dbInterface.getAll({
+		transformValFunc: stringToArr,
+		excludeKey: ['URL_COLLECTION_LENGTH'],
+		res: res
 	});
 });
 

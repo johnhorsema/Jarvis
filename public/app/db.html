@@ -5,8 +5,14 @@
 	<div class="overlay"></div>
 </div>
 <div ng-show="ctrl.loaded">
+	<div class="back-home">
+	    <a href="/" class="btn btn-sm btn-default">
+	        <span class="glyphicon glyphicon-new-window" aria-hidden="true"></span> Live
+	    </a>
+	</div>
 	<div ng-show="ctrl.dataLength>0">
 		<h2 ng-bind="ctrl.welcomeMsg"></h2>
+		<h4><span class="label label-default">{{ctrl.data.URL_COLLECTION_LENGTH||0}}</span> document(s) indexed.</h4>
 		<h4>Below shows the database entries:</h4>
 		<table class="table table-responsive">
 		  <thead>
@@ -19,7 +25,8 @@
 		    <tr ng-repeat="(key, value) in ctrl.data">
 		      <td ng-bind="key"></td>
 		      <td>
-		      	<span ng-repeat="val in value">{{val}}<br></span>
+		      	<span ng-if="value.isArray()" ng-repeat="val in value">{{val}}<br></span>
+		      	<span ng-if="!value.isArray()">{{value}}</span>
 		      </td>
 		    </tr>
 		  </tbody>
@@ -31,7 +38,7 @@
 		</div>
 		<div class="row">
 			<div class="col-xs-4"></div>
-			<a class="col-xs-4 btn btn-md btn-primary" href="./scrape">Start scraping</a>
+			<a class="col-xs-4 btn btn-md btn-primary" href="/scrape">Start scraping</a>
 		</div>
 		<div class="overlay"></div>
 	</div>

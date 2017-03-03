@@ -51,3 +51,9 @@ body { padding-top: 100px; }
 .jarvis-text {
 	color: #2979ff;
 }
+
+.admin-area {
+	position: absolute;
+	top: 1em;
+	right: 1em;
+}

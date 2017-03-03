@@ -14,6 +14,7 @@ angular.module('myApp', [
         controller: 'DbCtrl as ctrl',
         title: 'Admin'
     })
+    .when('/scrape', {})
     .otherwise({
     	redirectTo: '/'
     });
@@ -66,8 +67,13 @@ angular.module('myApp', [
 		// or server returns response with an error status.
 	});
 })
-.run(['$rootScope', function($rootScope) {
+.run(['$rootScope','$window', function($rootScope, $window) {
     $rootScope.$on('$routeChangeSuccess', function (event, current, previous) {
         $rootScope.title = current.$$route.title;
+        // Redirect Angular route to express route
+        if(current.$$route.originalPath=='/scrape'){
+        	console.log($window);
+        	$window.location.href = '/scrape';
+        }
     });
 }]);

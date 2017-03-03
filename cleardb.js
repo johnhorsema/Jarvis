@@ -1,0 +1,1 @@
+require('leveldown').destroy('./mydb', function (err) { console.log('Database destroyed. Run npm start to create a new one.') })

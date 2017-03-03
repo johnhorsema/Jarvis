@@ -69,3 +69,9 @@
   -webkit-animation:0.5s hide;
   animation:0.5s hide;
 }
+
+.back-home {
+	position: absolute;
+	top: 1em;
+	right: 1em;
+}
