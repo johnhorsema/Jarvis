@@ -7,18 +7,8 @@ var stemmer = require('porter-stemmer').stemmer;
 var levelup = require('level');
 var app     = express();
 
-let URL_LIMIT = 4;
-let DEPTH_LIMIT = 1;
-
-// URL_LIMIT, Pages Scraped
-// 2, 16
-// 4, 19
-// 8, 32
-// 10, 254
-// 12, 273
-// 14, 265
-// 16, 272
-// 32, 843
+let URL_LIMIT = 30;
+let DEPTH_LIMIT = 2;
 
 // Database Configuration
 
@@ -80,6 +70,27 @@ var HashTable = function(options) {
 			res.json(instance);
 		});
 	};
+	hashtable.increment = function(key, num) {
+		// Check if key exists in db
+		var exist = true;
+		db.get(key, function (err, value) {
+			if(err){
+				exist = !err.notFound;
+			}
+			// If exist
+			if(exist) {
+				// increment record value by number
+				db.put(key, parseInt(value)+parseInt(num), function (err) {
+					if (err) console.log('Db IO Error!', err);
+				});
+			}
+			else {
+				// If not exist,
+				// Initialize as 0
+				hashtable.replace(key, 0);
+			}
+		});
+	};
 	return hashtable;
 } 
 
@@ -100,14 +111,17 @@ app.get('/scrape', function(req, res){
 	// res.sendFile(path.join(__dirname + '/README.html'));
 
     function makeRequest(url, depth, visited){
+    	// Normalize URL (remove trailing slash)
+    	url = url.replace(/\/$/, "");
+
+    	// Return if visited
+    	if(visited.indexOf(url)!=-1) return;
+
     	// Return if depth exceeded limit
     	if(depth>DEPTH_LIMIT) return;
 
     	// Return if visited exceeded limit
     	if(visited.length>URL_LIMIT) return;
-
-    	// Normalize URL (remove trailing slash)
-    	url = url.replace(/\/$/, "");
 
     	console.log('Start scraping: '+url);
 
@@ -124,9 +138,21 @@ app.get('/scrape', function(req, res){
 
 	            var $ = cheerio.load(html);
 
-	            function getTitle($) {
+	            function collectMeta($) {
 	            	var title = $('title').text();
-	            	return title;
+	            	if(!title) {
+	            		title = url;
+	            	}
+	            	// Only for www.cse.ust.hk
+	            	var date = $('p.right').text().match(/[0-9\-]+/g);
+	            	if(date && Array.isArray(date)){
+	            		date = date[0];
+	            	}
+	            	if(!date){
+	            		date = response.headers['last-modified'] || response.headers.date;
+	            	}
+	            	var size = response.headers['content-length'] || $('html > body').text().length;
+	            	return {title: title, date: date, size: size};
 	            }
 
 	            function collectWords($) {
@@ -194,12 +220,36 @@ app.get('/scrape', function(req, res){
 					return freqMap;
 				}
 
+				function generateSpiderTxtFile(inputs) {
+					var title = inputs.meta.title;
+					var url = inputs.url;
+					var date = inputs.meta.date;
+					var size = inputs.meta.size;
+					var wordFreq = inputs.wordFreq;
+					var childLinks = inputs.childLinks;
+
+					function parseWordFreq(input) {
+						var string = '';
+						Object.keys(input).forEach(function(key){
+							string = string+key+' '+input[key]+'; ';
+						});
+						return string;
+					}
+
+					var result = [title,url,date+', '+size,parseWordFreq(wordFreq)];
+					result = result.concat(childLinks,'--------------------------------------------------',null);
+
+					fs.appendFile('spider_result.txt', result.join('\n'), function(err){
+					    console.log('File successfully written! - Check your project directory for the spider_result.txt file');
+					});
+				}
+
 				// console.log('Words in '+url+':');
 				var words = collectWords($);
 				if(words === null){
 					return;
 				}
-				words = removeStopwords(words);
+				wordsFiltered = removeStopwords(words);
 				// console.log(words.join(' '));
 				// console.log('\n\n\n\n');
 				// console.log('Links in '+url+':');
@@ -214,7 +264,7 @@ app.get('/scrape', function(req, res){
 				// });
 
 				// Write stemmed words to txt
-				var stemmed = stemify(words);
+				var stemmed = stemify(wordsFiltered);
 				// fs.writeFile('stemmed.txt', stemmed.join(' '), function(err){
 				//     console.log('File successfully written! - Check your project directory for the stemmed.txt file');
 				// });
@@ -222,14 +272,18 @@ app.get('/scrape', function(req, res){
 				// Convert stemmed words to freq table
 				var freqTable = wordFreq(stemmed);
 
+				// Generate the spider_result.txt file
+				generateSpiderTxtFile({meta: collectMeta($),url: url,wordFreq: freqTable, childLinks: links[1]});
+
 				// Add table records to db
 				Object.keys(freqTable).forEach(function(key) {
 					dbInterface.update(key, [freqTable[key], url]);
 				});
 
 				console.log('Done Scraping: '+url+'(level: '+depth+')');
-				visited.push(url);
-				dbInterface.replace('URL_COLLECTION_LENGTH',visited.length);
+				visited = visited.concat(url);
+				dbInterface.update('URL_COLLECTION', [url, words.length]);
+				dbInterface.increment('URL_COLLECTION_LENGTH', 1);
 
 				if(visited.length<=URL_LIMIT){
 					if(links[1]){
