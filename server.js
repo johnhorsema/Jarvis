@@ -8,7 +8,7 @@ var levelup = require('level');
 var app     = express();
 
 let URL_LIMIT = 30;
-let DEPTH_LIMIT = 2;
+let DEPTH_LIMIT = 1;
 
 // Database Configuration
 
@@ -23,6 +23,11 @@ console.log('Database created at /mydb.');
 var HashTable = function(options) {
 	var db = options.db;
 	var hashtable = {};
+	hashtable.get = function(key, callback) {
+		db.get(key, function(err, value) {
+			return callback(value);
+		});
+	};
 	hashtable.replace = function(key, inputVal) {
 		db.put(key, inputVal, function (err) {
 			if (err) console.log('Db IO Error!', err);
@@ -87,7 +92,7 @@ var HashTable = function(options) {
 			else {
 				// If not exist,
 				// Initialize as 0
-				hashtable.replace(key, 0);
+				hashtable.replace(key, 0+parseInt(num));
 			}
 		});
 	};
@@ -110,20 +115,14 @@ app.get('/scrape', function(req, res){
 	res.send('Check the console for results.');
 	// res.sendFile(path.join(__dirname + '/README.html'));
 
-    function makeRequest(url, depth, visited){
+    function makeRequest(url, depth){
     	// Normalize URL (remove trailing slash)
     	url = url.replace(/\/$/, "");
-
-    	// Return if visited
-    	if(visited.indexOf(url)!=-1) return;
 
     	// Return if depth exceeded limit
     	if(depth>DEPTH_LIMIT) return;
 
-    	// Return if visited exceeded limit
-    	if(visited.length>URL_LIMIT) return;
-
-    	console.log('Start scraping: '+url);
+    	// console.log('Start scraping: '+url);
 
 	    // The structure of our request call
 	    // The first parameter is our URL
@@ -263,6 +262,9 @@ app.get('/scrape', function(req, res){
 				// 	console.log(data);
 				// });
 
+				// Unique links
+				links[1] = Array.from(new Set(links[1]));
+
 				// Write stemmed words to txt
 				var stemmed = stemify(wordsFiltered);
 				// fs.writeFile('stemmed.txt', stemmed.join(' '), function(err){
@@ -273,25 +275,39 @@ app.get('/scrape', function(req, res){
 				var freqTable = wordFreq(stemmed);
 
 				// Generate the spider_result.txt file
-				generateSpiderTxtFile({meta: collectMeta($),url: url,wordFreq: freqTable, childLinks: links[1]});
+				// generateSpiderTxtFile({meta: collectMeta($),url: url,wordFreq: freqTable, childLinks: links[1]});
 
 				// Add table records to db
 				Object.keys(freqTable).forEach(function(key) {
 					dbInterface.update(key, [freqTable[key], url]);
 				});
 
-				console.log('Done Scraping: '+url+'(level: '+depth+')');
-				visited = visited.concat(url);
+				// console.log('Done Scraping: '+url+'(level: '+depth+')');
 				dbInterface.update('URL_COLLECTION', [url, words.length]);
 				dbInterface.increment('URL_COLLECTION_LENGTH', 1);
 
-				if(visited.length<=URL_LIMIT){
-					if(links[1]){
-						links[1].forEach(function(link){
-				    		makeRequest(link, depth+1, visited);
+				if(links[1]){
+					links[1].forEach(function(link){
+						// Check the URL_COLLECTION_LENGTH
+						dbInterface.get('URL_COLLECTION_LENGTH', function(urlCollectionLength){
+								dbInterface.get('URL_COLLECTION', function(urlCollection){
+									var visited = null;
+									if(urlCollection){
+										visited = urlCollection.split(',');
+									}
+									// Proceed if:
+									// within limit AND
+									// not visited
+									// OR both null
+									// console.log(urlCollectionLength,urlCollection);
+									if(urlCollectionLength === undefined || urlCollectionLength < URL_LIMIT && visited.indexOf(link) == -1){
+										makeRequest(link, depth+1);
+									}
+								});
 						});
-					}
+					});
 				}
+				return;
 	        }
 	    });
     }
@@ -299,7 +315,8 @@ app.get('/scrape', function(req, res){
     // The URL we will scrape from
     var ROOT = 'http://www.cse.ust.hk';
 
-    makeRequest(ROOT, 0, []);
+    makeRequest(ROOT, 0);
+    console.log('Scrape Complete');
 });
 
 app.get('/db', function(req, res){
