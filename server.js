@@ -2,104 +2,115 @@ var express = require('express');
 var path = require('path');
 var fs = require('fs');
 var request = require('request');
+var rp = require('request-promise');
 var cheerio = require('cheerio');
 var stemmer = require('porter-stemmer').stemmer;
 var levelup = require('level');
 var app     = express();
 
 let URL_LIMIT = 30;
-let DEPTH_LIMIT = 1;
 
 // Database Configuration
 
 // Create our database, supply location and options.
 // This will create or open the underlying LevelDB store.
-var mydb = levelup('./mydb')
-console.log('Database created at /mydb.');
+var mydb_url_mapping = levelup('./mydb/url_mapping');
+var mydb_word_mapping = levelup('./mydb/word_mapping');
+var mydb_forward = levelup('./mydb/forward');
+var mydb_inverted = levelup('./mydb/inverted');
+var mydb_info = levelup('./mydb/info');
+var mydb_parent_child = levelup('./mydb/parent_child');
+console.log('Databases created at /mydb.');
 
-// Define the hashtable interface
+// Define the databse interface
 // update(): append values for existing kv-pairs, create if not exist
 // getAll(): return all kv-pairs
-var HashTable = function(options) {
+var DbInterface = function(options) {
 	var db = options.db;
-	var hashtable = {};
-	hashtable.get = function(key, callback) {
+	var interface = {};
+	interface.exist = function(key, callback) {
+		var stream = db.createReadStream();
+		var exist = false;
+		stream.on('data', function(data) {
+			if(data.key==key){
+				exist = true;
+			}
+		});
+		stream.on('end', function() {
+			return callback(exist);
+		});
+	};
+	interface.get = function(key, callback) {
 		db.get(key, function(err, value) {
+			if(err){
+				return callback(false);
+			}
 			return callback(value);
 		});
 	};
-	hashtable.replace = function(key, inputVal) {
+	interface.replace = function(key, inputVal) {
 		db.put(key, inputVal, function (err) {
 			if (err) console.log('Db IO Error!', err);
 		});
 	};
-	hashtable.update = function(key, inputVal) {
+	interface.update = function(key, inputVal) {
+		if(typeof inputVal === 'string'){
+			inputVal = [].concat(inputVal);
+		}
 		// Check if key exists in db
 		var exist = true;
-		db.get(key, function (err, value) {
-			if(err){
-				exist = !err.notFound;
-			}
+		interface.get(key, function (value) {
 			// If exist
-			if(exist) {
+			if(value != false){
 				// add new record with same key but updated value
 				var current = value.split(',');
-				db.put(key, current.concat(inputVal), function (err) {
+				var res = current.concat(inputVal);
+				db.put(key, res, function (err) {
 					if (err) console.log('Db IO Error!', err);
 				});
 			}
 			else {
 				// If not exist,
 				// Put new record
-				hashtable.replace(key, inputVal);
+				db.put(key, inputVal, function (err) {
+					if (err) console.log('Db IO Error!', err);
+				});
 			}
 		});
 	};
-	hashtable.getAll = function(options) {
+	interface.getAll = function(options, callback) {
 		// Method to 
 		// 1. transform value(s) only when the key is not excluded
 		// 2. return all kv-pairs
 		var transformValFunc = options.transformValFunc;
 		var excludeKey = options.excludeKey;
-		var res = options.res;
 		var instance = {};
 		var stream = db.createReadStream();
 		stream.on('data', function(data) {
 			instance[data.key] = data.value;
 			// if not excluded (=included), transform the value
 			if(excludeKey.indexOf(data.key)==-1){
-				instance[data.key] = transformValFunc(data.value);
+				if(transformValFunc === null){
+					instance[data.key] = data.value;
+				}
+				else{
+					instance[data.key] = transformValFunc(data.value);
+				}
 			}
 		});
 		stream.on('end', function() {
-			res.json(instance);
+			callback(instance);
 		});
 	};
-	hashtable.increment = function(key, num) {
-		// Check if key exists in db
-		var exist = true;
-		db.get(key, function (err, value) {
-			if(err){
-				exist = !err.notFound;
-			}
-			// If exist
-			if(exist) {
-				// increment record value by number
-				db.put(key, parseInt(value)+parseInt(num), function (err) {
-					if (err) console.log('Db IO Error!', err);
-				});
-			}
-			else {
-				// If not exist,
-				// Initialize as 0
-				hashtable.replace(key, 0+parseInt(num));
-			}
-		});
-	};
-	return hashtable;
+	return interface;
 } 
 
-var dbInterface = HashTable({db: mydb});
+var dbInterface_url_mapping = DbInterface({db: mydb_url_mapping});
+var dbInterface_word_mapping = DbInterface({db: mydb_word_mapping});
+var dbInterface_forward = DbInterface({db: mydb_forward});
+var dbInterface_inverted = DbInterface({db: mydb_inverted});
+var dbInterface_info = DbInterface({db: mydb_info});
+var dbInterface_parent_child = DbInterface({db: mydb_parent_child});
 
 app.use('/static', express.static(__dirname + '/public'));
 
@@ -112,50 +123,41 @@ app.get('/admin', function(req, res){
 });
 
 app.get('/scrape', function(req, res){
-	res.send('Check the console for results.');
-	// res.sendFile(path.join(__dirname + '/README.html'));
+	function makeRequest(url, visited, url_id, word_id, sibling) {
+		var deferred = Promise.defer();
+		var options = {
+		    uri: url,
+		    transform: function (body, response) {
+		        return {$: cheerio.load(body), headers: response.headers};
+		    }
+		};
 
-    function makeRequest(url, depth){
-    	// Normalize URL (remove trailing slash)
-    	url = url.replace(/\/$/, "");
-
-    	// Return if depth exceeded limit
-    	if(depth>DEPTH_LIMIT) return;
-
-    	// console.log('Start scraping: '+url);
-
-	    // The structure of our request call
-	    // The first parameter is our URL
-	    // The callback function takes 3 parameters, an error, response status code and the html
-
-	    request(url, function(error, response, html){
-
-	        // First we'll check to make sure no errors occurred when making the request
-
-	        if(!error){
-	            // Next, we'll utilize the cheerio library on the returned html which will essentially give us jQuery functionality
-
-	            var $ = cheerio.load(html);
-
-	            function collectMeta($) {
-	            	var title = $('title').text();
+	    rp(options)
+	    	.then(function(response){
+	            function collectMeta(response) {
+	            	var title = response.$('title').text().trim();
 	            	if(!title) {
 	            		title = url;
 	            	}
 	            	// Only for www.cse.ust.hk
-	            	var date = $('p.right').text().match(/[0-9\-]+/g);
+	            	var date = response.$('p.right').text().match(/[0-9\-]+/g);
 	            	if(date && Array.isArray(date)){
 	            		date = date[0];
 	            	}
 	            	if(!date){
 	            		date = response.headers['last-modified'] || response.headers.date;
 	            	}
-	            	var size = response.headers['content-length'] || $('html > body').text().length;
+	            	date = date.replace(',', ' ');
+	            	var size = response.headers['content-length'] || response.$('html > body').text().trim().length;
 	            	return {title: title, date: date, size: size};
 	            }
 
-	            function collectWords($) {
-	            	var bodyText = $('html > body').text().match(/[A-Za-z0-9]{2,20}/g);
+	            function collectWords(response) {
+	            	// Remove javascript
+	            	response.$('html > body > script').remove();
+	            	var bodyText = response.$('html > body').text();
+	            	bodyText = bodyText.match(/[A-Za-z0-9]{2,20}/g);
+
 	            	// Force all to lowercase
 	            	var result = [];
 	            	if(bodyText){
@@ -165,19 +167,19 @@ app.get('/scrape', function(req, res){
 	            	return bodyText;
 	            }
 
-	            function collectInternalLinks($) {
+	            function collectInternalLinks(response) {
 					var allRelativeLinks = [];
 					var allAbsoluteLinks = [];
 
-					var relativeLinks = $("a[href^='/']");
+					var relativeLinks = response.$("a[href^='/']");
 					relativeLinks.each(function() {
-					allRelativeLinks.push($(this).attr('href'));
+					allRelativeLinks.push(response.$(this).attr('href'));
 
 					});
 
-					var absoluteLinks = $("a[href^='http']");
+					var absoluteLinks = response.$("a[href^='http']");
 					absoluteLinks.each(function() {
-					allAbsoluteLinks.push($(this).attr('href'));
+					allAbsoluteLinks.push(response.$(this).attr('href'));
 					});
 
 					return [allRelativeLinks, allAbsoluteLinks];
@@ -207,134 +209,271 @@ app.get('/scrape', function(req, res){
 					return filtered;
 				}
 
-				function wordFreq(arr) {
-					var freqMap = {};
-					arr.forEach(function(w) {
-						if (!freqMap[w]) {
-							freqMap[w] = 0;
+				function posFreq(arr) {
+					var posMap = {};
+					arr.forEach(function(w, pos) {
+						if(!posMap[w]){
+							posMap[w] = [];
 						}
-						freqMap[w] += 1;
+						if(posMap[w].push !== undefined){
+							posMap[w].push(pos);
+						}
 					});
-
-					return freqMap;
-				}
-
-				function generateSpiderTxtFile(inputs) {
-					var title = inputs.meta.title;
-					var url = inputs.url;
-					var date = inputs.meta.date;
-					var size = inputs.meta.size;
-					var wordFreq = inputs.wordFreq;
-					var childLinks = inputs.childLinks;
-
-					function parseWordFreq(input) {
-						var string = '';
-						Object.keys(input).forEach(function(key){
-							string = string+key+' '+input[key]+'; ';
-						});
-						return string;
-					}
-
-					var result = [title,url,date+', '+size,parseWordFreq(wordFreq)];
-					result = result.concat(childLinks,'--------------------------------------------------',null);
-
-					fs.appendFile('spider_result.txt', result.join('\n'), function(err){
-					    console.log('File successfully written! - Check your project directory for the spider_result.txt file');
-					});
+					return posMap;
 				}
 
 				// console.log('Words in '+url+':');
-				var words = collectWords($);
+				var words = collectWords(response);
 				if(words === null){
 					return;
 				}
 				wordsFiltered = removeStopwords(words);
-				// console.log(words.join(' '));
-				// console.log('\n\n\n\n');
-				// console.log('Links in '+url+':');
-				var links = collectInternalLinks($);
-				// console.log("Found " + links[0].length + " relative links");
-				// links[0].forEach(function(data) {
-				// 	console.log(data);
-				// });
-				// console.log("Found " + links[1].length + " absolute links");
-				// links[1].forEach(function(data) {
-				// 	console.log(data);
-				// });
 
-				// Unique links
-				links[1] = Array.from(new Set(links[1]));
-
-				// Write stemmed words to txt
+				// Stem words
 				var stemmed = stemify(wordsFiltered);
-				// fs.writeFile('stemmed.txt', stemmed.join(' '), function(err){
-				//     console.log('File successfully written! - Check your project directory for the stemmed.txt file');
-				// });
 
 				// Convert stemmed words to freq table
-				var freqTable = wordFreq(stemmed);
+				var posTable = posFreq(stemmed);
 
-				// Generate the spider_result.txt file
-				// generateSpiderTxtFile({meta: collectMeta($),url: url,wordFreq: freqTable, childLinks: links[1]});
+				// Add mapping for URL -> Url ID
+				dbInterface_url_mapping.replace(url, url_id);
 
-				// Add table records to db
-				Object.keys(freqTable).forEach(function(key) {
-					dbInterface.update(key, [freqTable[key], url]);
+				// Add page info as Url -> Info
+				var raw_meta = collectMeta(response);
+				dbInterface_info.replace(url_id, [raw_meta.title, raw_meta.date, raw_meta.size, words.length]);
+
+				// Add mapping for Word -> Word ID
+				Object.keys(posTable).forEach(function(key) {
+					dbInterface_word_mapping.replace(key, word_id++);
 				});
 
-				// console.log('Done Scraping: '+url+'(level: '+depth+')');
-				dbInterface.update('URL_COLLECTION', [url, words.length]);
-				dbInterface.increment('URL_COLLECTION_LENGTH', 1);
+				// Add forward index
+				dbInterface_forward.replace(url_id, Object.keys(posTable));
 
-				if(links[1]){
-					links[1].forEach(function(link){
-						// Check the URL_COLLECTION_LENGTH
-						dbInterface.get('URL_COLLECTION_LENGTH', function(urlCollectionLength){
-								dbInterface.get('URL_COLLECTION', function(urlCollection){
-									var visited = null;
-									if(urlCollection){
-										visited = urlCollection.split(',');
-									}
-									// Proceed if:
-									// within limit AND
-									// not visited
-									// OR both null
-									// console.log(urlCollectionLength,urlCollection);
-									if(urlCollectionLength === undefined || urlCollectionLength < URL_LIMIT && visited.indexOf(link) == -1){
-										makeRequest(link, depth+1);
-									}
-								});
-						});
+				// Add inverted index
+				Object.keys(posTable).forEach(function(key) {
+					dbInterface_inverted.update(key, [url_id, posTable[key].length].concat(posTable[key]));
+				});
+
+				visited.push(url);
+
+				var allLinks = collectInternalLinks(response);
+
+				// Unique links
+				var links = Array.from(new Set(allLinks[1]));
+
+				// Pre-process links
+				var filteredLinks = [];
+				links.forEach(function(l){
+					// Remove links containing 'unsupportedbrowser'
+					// Remove visited links
+					if (l.indexOf('unsupportedbrowser')==-1 && visited.indexOf(l)==-1) {
+						// Remove trailing slash
+						var res = l.replace(/\/$/, "");
+						res = res.replace(/\?(.*?)$/, "");
+						filteredLinks.push(res);
+					}
+				});
+
+				dbInterface_parent_child.replace(url, filteredLinks);
+
+				if(visited.length <= URL_LIMIT && filteredLinks.length > 0){
+					var childrenRequests = [];
+					// If children are too many, reduce
+					if(visited.length + sibling > URL_LIMIT){
+						filteredLinks = filteredLinks.slice(0,URL_LIMIT-visited.length);
+					}
+					filteredLinks.forEach(function(cl, idx){
+						options.uri = cl;
+						if(idx>0){
+							visited = visited.concat(filteredLinks.slice(0,idx));
+							visited = Array.from(new Set(visited));
+						}
+						childrenRequests.push(makeRequest(cl, visited, url_id+idx, word_id, filteredLinks.length));
+					});
+					Promise.all(childrenRequests).then(function(){
+						deferred.resolve();
 					});
 				}
-				return;
-	        }
-	    });
-    }
+				deferred.resolve();
+				
+	        })
+			.catch(function (err) {
+		    	deferred.reject(err);
+		    });
 
-    // The URL we will scrape from
+		return deferred.promise;
+	}
+
+	// The URL we will scrape from
     var ROOT = 'http://www.cse.ust.hk';
-
-    makeRequest(ROOT, 0);
-    console.log('Scrape Complete');
+    dbInterface_url_mapping.getAll({
+		transformValFunc: null,
+		excludeKey: []
+	}, function(url_instance){
+		dbInterface_word_mapping.getAll({
+			transformValFunc: null,
+			excludeKey: []
+		}, function(word_instance){
+			var url_id = Object.keys(url_instance).length;
+			var word_id = Object.keys(word_instance).length;
+			var visited = Object.keys(url_instance).map(function(key){
+				return url_instance[key];
+			});
+			makeRequest(ROOT, visited, url_id, word_id, 0).then(function(){
+				console.log('Scrape completed.');
+				res.send('Check console for results.');
+			});
+		})
+	});
 });
 
-app.get('/db', function(req, res){
+app.get('/db_url_mapping', function(req, res){
+	dbInterface_url_mapping.getAll({
+		transformValFunc: null,
+		excludeKey: []
+	}, function(instance){
+		res.json(instance);
+	});
+});
+
+app.get('/db_word_mapping', function(req, res){
+	dbInterface_word_mapping.getAll({
+		transformValFunc: null,
+		excludeKey: []
+	}, function(instance){
+		res.json(instance);
+	});
+});
+
+app.get('/db_forward', function(req, res){
 	var stringToArr = function(s) {
+		var arr = s.split(',');
+		return arr;
+	};
+	dbInterface_forward.getAll({
+		transformValFunc: stringToArr,
+		excludeKey: []
+	}, function(instance){
+		res.json(instance);
+	});
+});
+
+app.get('/db_inverted', function(req, res){
+	var invertedToArr = function(s) {
 		var res = [];
 		var arr = s.split(',');
-		for(var i=0; i<arr.length; i+=2) {
-			var subarr = [];
-			subarr.push(arr[i]);
-			subarr.push(arr[i+1]);
-			res.push(subarr);
+		var i = 0;
+		while(i<arr.length){
+			var urlId = arr[i];
+			var posnum = arr[i+1];
+			if(posnum>0){
+				var posdata = arr.slice(i+2, i+posnum+1);
+				res.push({'id': urlId, 'data': posdata});
+				i = i + posnum + 1;
+			}
+			else{
+				i++;
+			}
 		}
 		return res;
 	};
-	dbInterface.getAll({
+	dbInterface_inverted.getAll({
+		transformValFunc: invertedToArr,
+		excludeKey: []
+	}, function(instance){
+		res.json(instance);
+	});
+});
+
+app.get('/db_info', function(req, res){
+	var stringToArr = function(s) {
+		var arr = s.split(',');
+		return arr;
+	};
+	dbInterface_info.getAll({
 		transformValFunc: stringToArr,
-		excludeKey: ['URL_COLLECTION_LENGTH'],
-		res: res
+		excludeKey: []
+	}, function(instance){
+		res.json(instance);
+	});
+});
+
+app.get('/db_parent_child', function(req, res){
+	var stringToArr = function(s) {
+		var arr = s.split(',');
+		return arr;
+	};
+	dbInterface_parent_child.getAll({
+		transformValFunc: stringToArr,
+		excludeKey: []
+	}, function(instance){
+		res.json(instance);
+	});
+});
+
+app.get('/spider_result', function(req, res){
+	function generateSpiderEntry(inputs) {
+		var title = inputs.meta.title;
+		var url = inputs.url;
+		var date = inputs.meta.date;
+		var size = inputs.meta.size;
+		var wordFreq = inputs.wordFreq;
+		var childLinks = inputs.childLinks;
+
+		function parseWordFreq(input) {
+			if(input==null) return null;
+			var string = '';
+			Object.keys(input).forEach(function(key){
+				string = string+key+' '+input[key].length+'; ';
+			});
+			return string;
+		}
+
+		var result = [title,url,date+', '+size,parseWordFreq(wordFreq)];
+		result = result.concat(childLinks,'--------------------------------------------------',null);
+
+		return result.join('\n');
+	}
+
+	var stringToArr = function(s) {
+		var arr = s.split(',');
+		return arr;
+	};
+
+	var spider_contents = "";
+	dbInterface_info.getAll({
+		transformValFunc: stringToArr,
+		excludeKey: []
+	}, function(urls){
+		dbInterface_url_mapping.getAll({
+			transformValFunc: stringToArr,
+			excludeKey: []
+		}, function(url_mappings){
+			url_mappings = Object.keys(url_mappings).sort(function(a,b){return parseInt(url_mappings[a])-parseInt(url_mappings[b])});
+			dbInterface_parent_child.getAll({
+				transformValFunc: stringToArr,
+				excludeKey: []
+			}, function(children){
+				Object.keys(urls).forEach(function(url_key){
+					if(url_mappings[url_key]){
+						spider_contents = spider_contents + generateSpiderEntry({
+							meta: {
+								title: urls[url_key][0],
+								date: urls[url_key][1],
+								size: urls[url_key][2] 
+							},
+							url: url_mappings[url_key],
+							wordFreq: null,
+							childLinks: children[url_mappings[url_key]]
+						});
+					}
+				});
+				console.log(spider_contents);
+				res.set({"Content-Disposition":"attachment; filename=\"spider_result.txt\""});
+				// res.send(spider_contents);
+			});
+		});
 	});
 });
 
@@ -344,6 +483,7 @@ app.use(function(req, res){
 
 app.listen('8081');
 
-console.log('Magic happens on port 8081');
+console.log("   ___                      _      \n  |_  |                    (_)     \n    | |  __ _  _ __ __   __ _  ___ \n    | | / _` || '__|\ \ / /| |/ __|\n/\__/ /| (_| || |    \ V / | |\__ \\\n\____/  \__,_||_|     \_/  |_||___/\n                                   \n");
+console.log('Jarvis standing-by on port 8081.');
 
 exports = module.exports = app;

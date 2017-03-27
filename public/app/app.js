@@ -26,17 +26,6 @@ angular.module('myApp', [
 	this.url = 'www.cse.ust.hk';
 	this.data = null;
 	var self = this;
-	$http({
-		method: 'GET',
-		url: '/db'
-	}).then(function successCallback(response) {
-	// this callback will be called asynchronously
-	// when the response is available
-		self.data = response.data;
-	}, function errorCallback(response) {
-		// called asynchronously if an error occurs
-		// or server returns response with an error status.
-	});
 })
 .controller('DbCtrl', function($scope, $route, $routeParams, $location, $http) {
 	this.welcomeMsg = 'Welcome to the Admin.';
@@ -44,10 +33,16 @@ angular.module('myApp', [
 	this.loaded = false;
 	this.dataLength = 0;
 
+	this.mappingToggle = false;
+	this.forwardToggle = false;
+	this.invertedToggle = false;
+	this.infoToggle = true;
+	this.parentchildToggle = true;
+
 	var self = this;
 
 	$scope.$watch(function(){
-		return self.data;
+		return self.data_info;
 	}, function(newVal) {
 		if(newVal) {
 			self.loaded = true;
@@ -57,11 +52,76 @@ angular.module('myApp', [
 
 	$http({
 		method: 'GET',
-		url: '/db'
+		url: '/db_url_mapping'
 	}).then(function successCallback(response) {
 	// this callback will be called asynchronously
 	// when the response is available
-		self.data = response.data;
+		self.data_url_mapping = Object.keys(response.data).sort(function(a,b){return parseInt(response.data[a])-parseInt(response.data[b])});
+	}, function errorCallback(response) {
+		// called asynchronously if an error occurs
+		// or server returns response with an error status.
+	});
+
+	$http({
+		method: 'GET',
+		url: '/db_word_mapping'
+	}).then(function successCallback(response) {
+	// this callback will be called asynchronously
+	// when the response is available
+		self.data_word_mapping = Object.keys(response.data).sort(function(a,b){return parseInt(response.data[a])-parseInt(response.data[b])});
+	}, function errorCallback(response) {
+		// called asynchronously if an error occurs
+		// or server returns response with an error status.
+	});
+
+	$http({
+		method: 'GET',
+		url: '/db_inverted'
+	}).then(function successCallback(response) {
+	// this callback will be called asynchronously
+	// when the response is available
+		self.data_inverted = response.data;
+	}, function errorCallback(response) {
+		// called asynchronously if an error occurs
+		// or server returns response with an error status.
+	});
+
+	$http({
+		method: 'GET',
+		url: '/db_forward'
+	}).then(function successCallback(response) {
+	// this callback will be called asynchronously
+	// when the response is available
+		self.data_forward = response.data;
+	}, function errorCallback(response) {
+		// called asynchronously if an error occurs
+		// or server returns response with an error status.
+	});
+
+	$http({
+		method: 'GET',
+		url: '/db_info'
+	}).then(function successCallback(response) {
+	// this callback will be called asynchronously
+	// when the response is available
+		var keys = Object.keys(response.data).sort(function(a,b){return parseInt(a)-parseInt(b)});
+		var values = [];
+		keys.forEach(function(k){
+			values.push(response.data[k])
+		});
+		self.data_info = values;
+	}, function errorCallback(response) {
+		// called asynchronously if an error occurs
+		// or server returns response with an error status.
+	});
+
+	$http({
+		method: 'GET',
+		url: '/db_parent_child'
+	}).then(function successCallback(response) {
+	// this callback will be called asynchronously
+	// when the response is available
+		self.data_parent_child = response.data;
 	}, function errorCallback(response) {
 		// called asynchronously if an error occurs
 		// or server returns response with an error status.

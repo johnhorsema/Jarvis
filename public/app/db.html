@@ -12,9 +12,41 @@
 	</div>
 	<div ng-show="ctrl.dataLength>0">
 		<h2 ng-bind="ctrl.welcomeMsg"></h2>
-		<h4><span class="label label-default">{{ctrl.data.URL_COLLECTION_LENGTH||0}}</span> document(s) indexed.</h4>
-		<h4>Below shows the database entries:</h4>
-		<table class="table table-responsive">
+		<h4><span class="label label-default" ng-bind="ctrl.data_url_mapping.length || 0"></span> document(s) indexed.</h4>
+		<div class="well">
+			<label class="switch">
+				<input type="checkbox" ng-model="ctrl.url_mappingToggle">
+				<div class="slider round"></div>
+			</label>
+			<span>URL Mapping</span>
+			<label class="switch">
+				<input type="checkbox" ng-model="ctrl.word_mappingToggle">
+				<div class="slider round"></div>
+			</label>
+			<span>Word Mapping</span>
+			<label class="switch">
+				<input type="checkbox" ng-model="ctrl.forwardToggle">
+				<div class="slider round"></div>
+			</label>
+			<span>Foward</span>
+			<label class="switch">
+				<input type="checkbox" ng-model="ctrl.invertedToggle">
+				<div class="slider round"></div>
+			</label>
+			<span>Inverted</span>
+			<label class="switch">
+				<input type="checkbox" ng-model="ctrl.infoToggle">
+				<div class="slider round"></div>
+			</label>
+			<span>Info</span>
+			<label class="switch">
+				<input type="checkbox" ng-model="ctrl.parentchildToggle">
+				<div class="slider round"></div>
+			</label>
+			<span>Parent Child Links</span>
+		</div>
+		<h4>mydb/url_mapping</h4>
+		<table class="table table-responsive" ng-show="ctrl.url_mappingToggle">
 		  <thead>
 		    <tr>
 		      <th>Key</th>
@@ -22,10 +54,94 @@
 		    </tr>
 		  </thead>
 		  <tbody>
-		    <tr ng-repeat="(key, value) in ctrl.data">
+		    <tr ng-repeat="(key, value) in ctrl.data_url_mapping | orderBy:'value'">
+		      <td ng-bind="key"></td>
+		      <td ng-bind="value"></td>
+		    </tr>
+		  </tbody>
+		</table>
+		<h4>mydb/word_mapping</h4>
+		<table class="table table-responsive" ng-show="ctrl.word_mappingToggle">
+		  <thead>
+		    <tr>
+		      <th>Key</th>
+		      <th>Value(s)</th>
+		    </tr>
+		  </thead>
+		  <tbody>
+		    <tr ng-repeat="(key, value) in ctrl.data_word_mapping | orderBy:'value'">
+		      <td ng-bind="key"></td>
+		      <td ng-bind="value"></td>
+		    </tr>
+		  </tbody>
+		</table>
+		<h4>mydb/forward</h4>
+		<table class="table table-responsive" ng-show="ctrl.forwardToggle">
+		  <thead>
+		    <tr>
+		      <th>Key</th>
+		      <th>Value(s)</th>
+		    </tr>
+		  </thead>
+		  <tbody>
+		    <tr ng-repeat="(key, value) in ctrl.data_forward">
 		      <td ng-bind="key"></td>
 		      <td>
-		      	<span ng-if="value.isArray()" ng-repeat="val in value">{{val}}<br></span>
+		      	<span ng-if="value.isArray()" ng-repeat="val in value track by $index">{{val}}</span>
+		      	<span ng-if="!value.isArray()">{{value}}</span>
+		      </td>
+		    </tr>
+		  </tbody>
+		</table>
+		<h4>mydb/inverted</h4>
+		<table class="table table-responsive" ng-show="ctrl.invertedToggle">
+		  <thead>
+		    <tr>
+		      <th>Key</th>
+		      <th>Value(s)</th>
+		    </tr>
+		  </thead>
+		  <tbody>
+		    <tr ng-repeat="(key, value) in ctrl.data_inverted">
+		      <td ng-bind="key"></td>
+		      <td>
+		      	<span ng-if="value.isArray()" ng-repeat="val in value track by $index">{{val.id}}: {{val.data}}</span>
+		      	<span ng-if="!value.isArray()">{{value}}</span>
+		      </td>
+		    </tr>
+		  </tbody>
+		</table>
+		<h4>mydb/info</h4>
+		<table class="table table-responsive" ng-show="ctrl.infoToggle">
+		  <thead>
+		    <tr>
+		      <th>Key</th>
+		      <th>Value(s)</th>
+		    </tr>
+		  </thead>
+		  <tbody>
+		    <tr ng-repeat="(key, value) in ctrl.data_info">
+		      <td ng-bind="key"></td>
+		      <td>
+		      	<span ng-if="value.isArray()" ng-repeat="val in value track by $index">{{val}}</span>
+		      	<span ng-if="!value.isArray()">{{value}}</span>
+		      </td>
+		    </tr>
+		  </tbody>
+		</table>
+		<h4>mydb/parent_child</h4>
+		<table class="table table-responsive" ng-show="ctrl.parentchildToggle">
+		  <thead>
+		    <tr>
+		      <th>Key</th>
+		      <th>Value(s)</th>
+		    </tr>
+		  </thead>
+		  <tbody>
+		    <tr ng-repeat="(key, value) in ctrl.data_parent_child">
+		      <td ng-bind="key"></td>
+		      <td>
+		      	<span ng-if="value.isArray()" ng-repeat="val in value track by $index">{{val}}</span>
 		      	<span ng-if="!value.isArray()">{{value}}</span>
 		      </td>
 		    </tr>
