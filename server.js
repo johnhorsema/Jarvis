@@ -123,8 +123,7 @@ app.get('/admin', function(req, res){
 });
 
 app.get('/scrape', function(req, res){
-	function makeRequest(url, visited, url_id, word_id, sibling) {
-		var deferred = Promise.defer();
+	function makeRequest(url, visited) {
 		var options = {
 		    uri: url,
 		    transform: function (body, response) {
@@ -132,7 +131,7 @@ app.get('/scrape', function(req, res){
 		    }
 		};
 
-	    rp(options)
+	    var promise = rp(options)
 	    	.then(function(response){
 	            function collectMeta(response) {
 	            	var title = response.$('title').text().trim();
@@ -222,7 +221,6 @@ app.get('/scrape', function(req, res){
 					return posMap;
 				}
 
-				// console.log('Words in '+url+':');
 				var words = collectWords(response);
 				if(words === null){
 					return;
@@ -235,96 +233,92 @@ app.get('/scrape', function(req, res){
 				// Convert stemmed words to freq table
 				var posTable = posFreq(stemmed);
 
-				// Add mapping for URL -> Url ID
-				dbInterface_url_mapping.replace(url, url_id);
+				dbInterface_url_mapping.getAll({
+					transformValFunc: null,
+					excludeKey: []
+				}, function(url_instance){
+					var url_id = Object.keys(url_instance).length;
+					var visited = Object.keys(url_instance);
 
-				// Add page info as Url -> Info
-				var raw_meta = collectMeta(response);
-				dbInterface_info.replace(url_id, [raw_meta.title, raw_meta.date, raw_meta.size, words.length]);
+					// Add mapping for URL -> Url ID
+					dbInterface_url_mapping.replace(url, url_id);
 
-				// Add mapping for Word -> Word ID
-				Object.keys(posTable).forEach(function(key) {
-					dbInterface_word_mapping.replace(key, word_id++);
-				});
+					// Add page info as Url -> Info
+					var raw_meta = collectMeta(response);
+					dbInterface_info.replace(url, [raw_meta.title, raw_meta.date, raw_meta.size, words.length]);
 
-				// Add forward index
-				dbInterface_forward.replace(url_id, Object.keys(posTable));
+					// Add mapping for Word -> Word ID
+					Object.keys(posTable).forEach(function(key) {
+						dbInterface_word_mapping.getAll({
+							transformValFunc: null,
+							excludeKey: []
+						}, function(word_instance){
+							var word_id = Object.keys(word_instance).length;
+							dbInterface_word_mapping.replace(key, word_id);
+						});
+					});
 
-				// Add inverted index
-				Object.keys(posTable).forEach(function(key) {
-					dbInterface_inverted.update(key, [url_id, posTable[key].length].concat(posTable[key]));
-				});
+					// Add forward index
+					dbInterface_forward.replace(url_id, Object.keys(posTable));
 
-				visited.push(url);
+					// Add inverted index
+					Object.keys(posTable).forEach(function(key) {
+						dbInterface_inverted.update(key, [url_id, posTable[key].length].concat(posTable[key]));
+					});
 
-				var allLinks = collectInternalLinks(response);
+					visited.push(url);
 
-				// Unique links
-				var links = Array.from(new Set(allLinks[1]));
+					var allLinks = collectInternalLinks(response);
 
-				// Pre-process links
-				var filteredLinks = [];
-				links.forEach(function(l){
-					// Remove links containing 'unsupportedbrowser'
-					// Remove visited links
-					if (l.indexOf('unsupportedbrowser')==-1 && visited.indexOf(l)==-1) {
-						// Remove trailing slash
-						var res = l.replace(/\/$/, "");
-						res = res.replace(/\?(.*?)$/, "");
-						filteredLinks.push(res);
-					}
-				});
+					// Unique links
+					var links = Array.from(new Set(allLinks[1]));
 
-				dbInterface_parent_child.replace(url, filteredLinks);
-
-				if(visited.length <= URL_LIMIT && filteredLinks.length > 0){
-					var childrenRequests = [];
-					// If children are too many, reduce
-					if(visited.length + sibling > URL_LIMIT){
-						filteredLinks = filteredLinks.slice(0,URL_LIMIT-visited.length);
-					}
-					filteredLinks.forEach(function(cl, idx){
-						options.uri = cl;
-						if(idx>0){
-							visited = visited.concat(filteredLinks.slice(0,idx));
-							visited = Array.from(new Set(visited));
+					// Pre-process links
+					var filteredLinks = [];
+					links.forEach(function(l){
+						// Remove links containing 'unsupportedbrowser'
+						// Remove visited links
+						if (l.indexOf('unsupportedbrowser') == -1 && visited.indexOf(l) == -1) {
+							// Remove trailing slash
+							var res = l.replace(/\/$/, "");
+							res = res.replace(/\?(.*?)$/, "");
+							filteredLinks.push(res);
 						}
-						childrenRequests.push(makeRequest(cl, visited, url_id+idx, word_id, filteredLinks.length));
 					});
-					Promise.all(childrenRequests).then(function(){
-						deferred.resolve();
-					});
-				}
-				deferred.resolve();
-				
-	        })
-			.catch(function (err) {
-		    	deferred.reject(err);
-		    });
+					dbInterface_parent_child.replace(url, filteredLinks);
+					if(url_id + filteredLinks.length < URL_LIMIT){
+						var childrenRequests = [];
+						if(URL_LIMIT - visited.length - 1 < filteredLinks.length) {
+							filteredLinks = filteredLinks.slice(0,URL_LIMIT-visited.length);
+						}
+						filteredLinks.forEach(function(cl, idx) {
+							if(idx>0){
+								visited = visited.concat(filteredLinks.slice(0,idx));
+								visited = Array.from(new Set(visited));
+							}	
+							childrenRequests.push(makeRequest(cl, visited));
+						});
+						childrenRequests.forEach(function(request){
+		    				promise = promise.then(request);
+	    				});
+					}
+				});
+			})
+			.catch(function(err){
 
-		return deferred.promise;
+			});
+
+			return promise;
 	}
 
 	// The URL we will scrape from
     var ROOT = 'http://www.cse.ust.hk';
-    dbInterface_url_mapping.getAll({
-		transformValFunc: null,
-		excludeKey: []
-	}, function(url_instance){
-		dbInterface_word_mapping.getAll({
-			transformValFunc: null,
-			excludeKey: []
-		}, function(word_instance){
-			var url_id = Object.keys(url_instance).length;
-			var word_id = Object.keys(word_instance).length;
-			var visited = Object.keys(url_instance).map(function(key){
-				return url_instance[key];
-			});
-			makeRequest(ROOT, visited, url_id, word_id, 0).then(function(){
-				console.log('Scrape completed.');
-				res.send('Check console for results.');
-			});
-		})
+    console.log('Scrape started...');
+	Promise.all(makeRequest(ROOT)).then(function(){
+		console.log('Scrape completed.');
+		res.send('Check console for results.');
+	}).catch(function(err){
+
 	});
 });
 
@@ -483,7 +477,7 @@ app.use(function(req, res){
 
 app.listen('8081');
 
-console.log("   ___                      _      \n  |_  |                    (_)     \n    | |  __ _  _ __ __   __ _  ___ \n    | | / _` || '__|\ \ / /| |/ __|\n/\__/ /| (_| || |    \ V / | |\__ \\\n\____/  \__,_||_|     \_/  |_||___/\n                                   \n");
+console.log("   ___                      _      \n  |_  |                    (_)     \n    | |  __ _  _ __ __   __ _  ___ \n    | | / _` || '__|\ \ / /| |/ __|\n /\__/ /| (_| || |    \ V / | |\__ \\\n  \____/  \__,_||_|     \_/  |_||___/\n                                   \n");
 console.log('Jarvis standing-by on port 8081.');
 
 exports = module.exports = app;
