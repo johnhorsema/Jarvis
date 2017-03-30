@@ -28,29 +28,22 @@ console.log('Databases created at /mydb.');
 var DbInterface = function(options) {
 	var db = options.db;
 	var interface = {};
-	interface.exist = function(key, callback) {
-		var stream = db.createReadStream();
-		var exist = false;
-		stream.on('data', function(data) {
-			if(data.key==key){
-				exist = true;
-			}
-		});
-		stream.on('end', function() {
-			return callback(exist);
-		});
-	};
-	interface.get = function(key, callback) {
-		db.get(key, function(err, value) {
-			if(err){
-				return callback(false);
-			}
-			return callback(value);
+	interface.get = function(key) {
+		return new Promise(function (resolve, reject) {
+			db.get(key, function(err, value) {
+				if(err){
+					reject(false);
+				}
+				resolve(value);
+			});
 		});
 	};
 	interface.replace = function(key, inputVal) {
-		db.put(key, inputVal, function (err) {
-			if (err) console.log('Db IO Error!', err);
+		return new Promise(function (resolve, reject) {
+			db.put(key, inputVal, function (err) {
+				if (err) reject(false);
+				resolve();
+			});
 		});
 	};
 	interface.update = function(key, inputVal) {
@@ -58,24 +51,26 @@ var DbInterface = function(options) {
 			inputVal = [].concat(inputVal);
 		}
 		// Check if key exists in db
-		var exist = true;
-		interface.get(key, function (value) {
-			// If exist
-			if(value != false){
-				// add new record with same key but updated value
-				var current = value.split(',');
-				var res = current.concat(inputVal);
-				db.put(key, res, function (err) {
-					if (err) console.log('Db IO Error!', err);
-				});
-			}
-			else {
-				// If not exist,
-				// Put new record
-				db.put(key, inputVal, function (err) {
-					if (err) console.log('Db IO Error!', err);
-				});
-			}
+		return new Promise(function (resolve, reject) {
+			interface.get(key, function (value) {
+				// If exist
+				if(value != false){
+					// add new record with same key but updated value
+					var current = value.split(',');
+					var res = current.concat(inputVal);
+					db.put(key, res, function (err) {
+						if (err) console.log('Db IO Error!', err);
+					});
+				}
+				else {
+					// If not exist,
+					// Put new record
+					db.put(key, inputVal, function (err) {
+						if (err) console.log('Db IO Error!', err);
+					});
+				}
+				resolve();
+			});
 		});
 	};
 	interface.getAll = function(options, callback) {
@@ -86,20 +81,22 @@ var DbInterface = function(options) {
 		var excludeKey = options.excludeKey;
 		var instance = {};
 		var stream = db.createReadStream();
-		stream.on('data', function(data) {
-			instance[data.key] = data.value;
-			// if not excluded (=included), transform the value
-			if(excludeKey.indexOf(data.key)==-1){
-				if(transformValFunc === null){
-					instance[data.key] = data.value;
+		return new Promise(function (resolve, reject) {
+			stream.on('data', function(data) {
+				instance[data.key] = data.value;
+				// if not excluded (=included), transform the value
+				if(excludeKey.indexOf(data.key)==-1){
+					if(transformValFunc === null){
+						instance[data.key] = data.value;
+					}
+					else{
+						instance[data.key] = transformValFunc(data.value);
+					}
 				}
-				else{
-					instance[data.key] = transformValFunc(data.value);
-				}
-			}
-		});
-		stream.on('end', function() {
-			callback(instance);
+			});
+			stream.on('end', function() {
+				resolve(instance);
+			});
 		});
 	};
 	return interface;
@@ -123,7 +120,7 @@ app.get('/admin', function(req, res){
 });
 
 app.get('/scrape', function(req, res){
-	function makeRequest(url, visited) {
+	function makeRequest(url) {
 		var options = {
 		    uri: url,
 		    transform: function (body, response) {
@@ -236,75 +233,81 @@ app.get('/scrape', function(req, res){
 				dbInterface_url_mapping.getAll({
 					transformValFunc: null,
 					excludeKey: []
-				}, function(url_instance){
-					var url_id = Object.keys(url_instance).length;
+				}).then(function(url_instance){
 					var visited = Object.keys(url_instance);
+					var url_id = visited.length;
+					console.log(url_id);
+					// Add mapping for URL
+					// URL -> Url ID
+					dbInterface_url_mapping.replace(url, url_id).then(function(){
+						// Add page info
+						// Url ID -> Info
+						var raw_meta = collectMeta(response);
+						dbInterface_info.replace(url_id, [raw_meta.title, raw_meta.date, raw_meta.size, words.length]).then(function(){
+							// Add mapping for Word -> Word ID
+							var word_promises = Object.keys(posTable).map(function(key) {
+								return dbInterface_word_mapping.getAll({
+									transformValFunc: null,
+									excludeKey: []
+								}).then(function(word_instance){
+									var word_id = Object.keys(word_instance).length;
+									dbInterface_word_mapping.replace(key, word_id).then(function(){
+										// Update/Add inverted index
+										// Word ID -> array of word positions in a document
+										dbInterface_inverted.update(word_id, [url_id, posTable[key].length].concat(posTable[key]));
+									});
+								});
+							});
+							Promise.all(word_promises).then(function(){
+								// Add forward index
+								// Url ID -> words
+								dbInterface_forward.replace(url_id, Object.keys(posTable)).then(function(){
 
-					// Add mapping for URL -> Url ID
-					dbInterface_url_mapping.replace(url, url_id);
 
-					// Add page info as Url -> Info
-					var raw_meta = collectMeta(response);
-					dbInterface_info.replace(url, [raw_meta.title, raw_meta.date, raw_meta.size, words.length]);
+									var allLinks = collectInternalLinks(response);
 
-					// Add mapping for Word -> Word ID
-					Object.keys(posTable).forEach(function(key) {
-						dbInterface_word_mapping.getAll({
-							transformValFunc: null,
-							excludeKey: []
-						}, function(word_instance){
-							var word_id = Object.keys(word_instance).length;
-							dbInterface_word_mapping.replace(key, word_id);
+									// Unique links
+									var links = Array.from(new Set(allLinks[1]));
+
+									// Pre-process links
+									var filteredLinks = [];
+									links.forEach(function(l){
+										// Remove links containing 'unsupportedbrowser'
+										// Remove visited links
+										if (l.indexOf('unsupportedbrowser') == -1 && visited.indexOf(l) == -1) {
+											// Remove trailing slash
+											var res = l.replace(/\/$/, "");
+											res = res.replace(/\?(.*?)$/, "");
+											filteredLinks.push(res);
+										}
+									});
+									dbInterface_parent_child.replace(url, filteredLinks).then(function(){
+										if(visited.length >= URL_LIMIT){
+											return promise;
+										}
+										else{
+											var childrenRequests = [];
+											if(URL_LIMIT - visited.length - 1 < filteredLinks.length) {
+												filteredLinks = filteredLinks.slice(0,URL_LIMIT-visited.length);
+											}
+											filteredLinks.forEach(function(cl, idx) {
+												if(idx>0){
+													visited = visited.concat(filteredLinks.slice(0,idx));
+													visited = Array.from(new Set(visited));
+												}
+												childrenRequests.push(makeRequest(cl));
+											});
+											childrenRequests.forEach(function(request){
+							    				promise = promise.then(request);
+						    				});
+										}
+									})
+								});
+							});
 						});
 					});
-
-					// Add forward index
-					dbInterface_forward.replace(url_id, Object.keys(posTable));
-
-					// Add inverted index
-					Object.keys(posTable).forEach(function(key) {
-						dbInterface_inverted.update(key, [url_id, posTable[key].length].concat(posTable[key]));
-					});
-
-					visited.push(url);
-
-					var allLinks = collectInternalLinks(response);
-
-					// Unique links
-					var links = Array.from(new Set(allLinks[1]));
-
-					// Pre-process links
-					var filteredLinks = [];
-					links.forEach(function(l){
-						// Remove links containing 'unsupportedbrowser'
-						// Remove visited links
-						if (l.indexOf('unsupportedbrowser') == -1 && visited.indexOf(l) == -1) {
-							// Remove trailing slash
-							var res = l.replace(/\/$/, "");
-							res = res.replace(/\?(.*?)$/, "");
-							filteredLinks.push(res);
-						}
-					});
-					dbInterface_parent_child.replace(url, filteredLinks);
-					if(url_id + filteredLinks.length < URL_LIMIT){
-						var childrenRequests = [];
-						if(URL_LIMIT - visited.length - 1 < filteredLinks.length) {
-							filteredLinks = filteredLinks.slice(0,URL_LIMIT-visited.length);
-						}
-						filteredLinks.forEach(function(cl, idx) {
-							if(idx>0){
-								visited = visited.concat(filteredLinks.slice(0,idx));
-								visited = Array.from(new Set(visited));
-							}	
-							childrenRequests.push(makeRequest(cl, visited));
-						});
-						childrenRequests.forEach(function(request){
-		    				promise = promise.then(request);
-	    				});
-					}
 				});
-			})
-			.catch(function(err){
+			}).catch(function(err){
 
 			});
 
@@ -314,7 +317,7 @@ app.get('/scrape', function(req, res){
 	// The URL we will scrape from
     var ROOT = 'http://www.cse.ust.hk';
     console.log('Scrape started...');
-	Promise.all(makeRequest(ROOT)).then(function(){
+	makeRequest(ROOT).then(function(){
 		console.log('Scrape completed.');
 		res.send('Check console for results.');
 	}).catch(function(err){
@@ -412,10 +415,10 @@ app.get('/spider_result', function(req, res){
 		var url = inputs.url;
 		var date = inputs.meta.date;
 		var size = inputs.meta.size;
-		var wordFreq = inputs.wordFreq;
+		var posFreq = inputs.posFreq;
 		var childLinks = inputs.childLinks;
 
-		function parseWordFreq(input) {
+		function parsePosFreq(input) {
 			if(input==null) return null;
 			var string = '';
 			Object.keys(input).forEach(function(key){
@@ -424,7 +427,7 @@ app.get('/spider_result', function(req, res){
 			return string;
 		}
 
-		var result = [title,url,date+', '+size,parseWordFreq(wordFreq)];
+		var result = [title,url,date+', '+size,parsePosFreq(posFreq)];
 		result = result.concat(childLinks,'--------------------------------------------------',null);
 
 		return result.join('\n');
@@ -449,23 +452,28 @@ app.get('/spider_result', function(req, res){
 				transformValFunc: stringToArr,
 				excludeKey: []
 			}, function(children){
-				Object.keys(urls).forEach(function(url_key){
-					if(url_mappings[url_key]){
-						spider_contents = spider_contents + generateSpiderEntry({
-							meta: {
-								title: urls[url_key][0],
-								date: urls[url_key][1],
-								size: urls[url_key][2] 
-							},
-							url: url_mappings[url_key],
-							wordFreq: null,
-							childLinks: children[url_mappings[url_key]]
-						});
-					}
+				dbInterface_inverted.getAll({
+					transformValFunc: stringToArr,
+					excludeKey: []
+				}, function(inverted){
+					Object.keys(urls).forEach(function(url_key){
+						if(url_mappings[url_key]){
+							spider_contents = spider_contents + generateSpiderEntry({
+								meta: {
+									title: urls[url_key][0],
+									date: urls[url_key][1],
+									size: urls[url_key][2]
+								},
+								url: url_mappings[url_key],
+								// posFreq: inverted[url_key],
+								childLinks: children[url_mappings[url_key]]
+							});
+						}
+					});
+					console.log(spider_contents);
+					res.set({"Content-Disposition":"attachment; filename=\"spider_result.txt\""});
+					// res.send(spider_contents);
 				});
-				console.log(spider_contents);
-				res.set({"Content-Disposition":"attachment; filename=\"spider_result.txt\""});
-				// res.send(spider_contents);
 			});
 		});
 	});
