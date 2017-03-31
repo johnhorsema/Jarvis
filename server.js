@@ -120,7 +120,56 @@ app.get('/admin', function(req, res){
 });
 
 app.get('/scrape', function(req, res){
-	function makeRequest(url) {
+	function buildPromiseChain(idx, promiseChain) {
+		function collectInternalLinks(response) {
+			var allRelativeLinks = [];
+			var allAbsoluteLinks = [];
+
+			var relativeLinks = response.$("a[href^='/']");
+			relativeLinks.each(function() {
+			allRelativeLinks.push(response.$(this).attr('href'));
+
+			});
+
+			var absoluteLinks = response.$("a[href^='http']");
+			absoluteLinks.each(function() {
+			allAbsoluteLinks.push(response.$(this).attr('href'));
+			});
+
+			return [allRelativeLinks, allAbsoluteLinks];
+		}
+
+		if(promiseChain.length == URL_LIMIT){
+			return promiseChain;
+		}
+
+		if(promiseChain.length < URL_LIMIT){
+			var options = {
+			    uri: promiseChain[idx],
+			    transform: function (body, response) {
+		        	return {$: cheerio.load(body), headers: response.headers};
+		    	}
+			};
+
+			return rp(options).then((response) => {
+				var allLinks = collectInternalLinks(response);
+				// Unique links
+				var links = Array.from(new Set(allLinks[1]));
+				links.forEach(function(link){
+					// Remove trailing slash
+					link = link.replace(/\/$/, "");
+					// Remove ?XXX segments
+					link = link.replace(/\?(.*?)$/, "");
+					if(promiseChain.length < URL_LIMIT && promiseChain.indexOf(link)==-1){
+						promiseChain.push(link);
+					}
+				});
+				return buildPromiseChain(idx+1, promiseChain);
+			});
+		}
+	}
+
+	function makeRequest(url, url_id) {
 		var options = {
 		    uri: url,
 		    transform: function (body, response) {
@@ -128,7 +177,8 @@ app.get('/scrape', function(req, res){
 		    }
 		};
 
-	    var promise = rp(options)
+	    return new Promise((resolve, reject) => {
+	    	rp(options)
 	    	.then(function(response){
 	            function collectMeta(response) {
 	            	var title = response.$('title').text().trim();
@@ -162,24 +212,6 @@ app.get('/scrape', function(req, res){
 	            	}
 	            	return bodyText;
 	            }
-
-	            function collectInternalLinks(response) {
-					var allRelativeLinks = [];
-					var allAbsoluteLinks = [];
-
-					var relativeLinks = response.$("a[href^='/']");
-					relativeLinks.each(function() {
-					allRelativeLinks.push(response.$(this).attr('href'));
-
-					});
-
-					var absoluteLinks = response.$("a[href^='http']");
-					absoluteLinks.each(function() {
-					allAbsoluteLinks.push(response.$(this).attr('href'));
-					});
-
-					return [allRelativeLinks, allAbsoluteLinks];
-				}
 
 				function stemify(source) {
 					var stemmed = [];
@@ -220,7 +252,7 @@ app.get('/scrape', function(req, res){
 
 				var words = collectWords(response);
 				if(words === null){
-					return;
+					console.log('no words');
 				}
 				wordsFiltered = removeStopwords(words);
 
@@ -230,106 +262,72 @@ app.get('/scrape', function(req, res){
 				// Convert stemmed words to freq table
 				var posTable = posFreq(stemmed);
 
-				dbInterface_url_mapping.getAll({
-					transformValFunc: null,
-					excludeKey: []
-				}).then(function(url_instance){
-					var visited = Object.keys(url_instance);
-					var url_id = visited.length;
-					console.log(url_id);
-					// Add mapping for URL
-					// URL -> Url ID
-					dbInterface_url_mapping.replace(url, url_id).then(function(){
-						// Add page info
-						// Url ID -> Info
-						var raw_meta = collectMeta(response);
-						dbInterface_info.replace(url_id, [raw_meta.title, raw_meta.date, raw_meta.size, words.length]).then(function(){
-							// Add mapping for Word -> Word ID
-							var word_promises = Object.keys(posTable).map(function(key) {
-								return dbInterface_word_mapping.getAll({
-									transformValFunc: null,
-									excludeKey: []
-								}).then(function(word_instance){
-									var word_id = Object.keys(word_instance).length;
-									dbInterface_word_mapping.replace(key, word_id).then(function(){
-										// Update/Add inverted index
-										// Word ID -> array of word positions in a document
-										dbInterface_inverted.update(word_id, [url_id, posTable[key].length].concat(posTable[key]));
-									});
+				dbInterface_url_mapping.replace(url, url_id).then(function(){
+					// Add page info
+					// Url ID -> Info
+					var raw_meta = collectMeta(response);
+					dbInterface_info.replace(url_id, [raw_meta.title, raw_meta.date, raw_meta.size, words.length]).then(function(){
+						// Add mapping for Word -> Word ID
+						var word_promises = Object.keys(posTable).map(function(key) {
+							return dbInterface_word_mapping.getAll({
+								transformValFunc: null,
+								excludeKey: []
+							}).then(function(word_instance){
+								var word_id = Object.keys(word_instance).length;
+								dbInterface_word_mapping.replace(key, word_id).then(function(){
+									// Update/Add inverted index
+									// Word ID -> array of word positions in a document
+									dbInterface_inverted.update(word_id, [url_id, posTable[key].length].concat(posTable[key]));g
 								});
 							});
-							Promise.all(word_promises).then(function(){
-								// Add forward index
-								// Url ID -> words
-								dbInterface_forward.replace(url_id, Object.keys(posTable)).then(function(){
-
-
-									var allLinks = collectInternalLinks(response);
-
-									// Unique links
-									var links = Array.from(new Set(allLinks[1]));
-
-									// Pre-process links
-									var filteredLinks = [];
-									links.forEach(function(l){
-										// Remove links containing 'unsupportedbrowser'
-										// Remove visited links
-										if (l.indexOf('unsupportedbrowser') == -1 && visited.indexOf(l) == -1) {
-											// Remove trailing slash
-											var res = l.replace(/\/$/, "");
-											res = res.replace(/\?(.*?)$/, "");
-											filteredLinks.push(res);
-										}
-									});
-									dbInterface_parent_child.replace(url, filteredLinks).then(function(){
-										if(visited.length >= URL_LIMIT){
-											return promise;
-										}
-										else{
-											var childrenRequests = [];
-											if(URL_LIMIT - visited.length - 1 < filteredLinks.length) {
-												filteredLinks = filteredLinks.slice(0,URL_LIMIT-visited.length);
-											}
-											filteredLinks.forEach(function(cl, idx) {
-												if(idx>0){
-													visited = visited.concat(filteredLinks.slice(0,idx));
-													visited = Array.from(new Set(visited));
-												}
-												childrenRequests.push(makeRequest(cl));
-											});
-											childrenRequests.forEach(function(request){
-							    				promise = promise.then(request);
-						    				});
-										}
-									})
-								});
+						});
+						Promise.all(word_promises).then(function(){
+							// Add forward index
+							// Url ID -> words
+							dbInterface_forward.replace(url_id, Object.keys(posTable)).then(function(){
+								resolve(1);
 							});
 						});
 					});
 				});
-			}).catch(function(err){
-
 			});
+		});
+	}
 
-			return promise;
+	var final = 0;
+	var idx = 0;
+	function workPromiseChain(chain) {
+    	return chain.reduce((promise, url) => {
+    		return promise
+	    		.then((result) => {
+	    			return makeRequest(url,idx).then((result) => {
+	    				idx++;
+	    				final+=result;
+	    				console.log('('+final/URL_LIMIT*100+'%) Processed '+url);
+	    			});
+	    		})
+	    		.catch();
+    	}, Promise.resolve(final));
 	}
 
 	// The URL we will scrape from
     var ROOT = 'http://www.cse.ust.hk';
     console.log('Scrape started...');
-	makeRequest(ROOT).then(function(){
-		console.log('Scrape completed.');
-		res.send('Check console for results.');
-	}).catch(function(err){
-
-	});
+    buildPromiseChain(0, [ROOT]).then((result)=>{
+    	console.log(result.length+' links found.');
+    	workPromiseChain(result)
+    	.then((end) => {
+			console.log('Scrape completed. '+end+' links scraped.');
+			res.send('Check console for results.');
+		});
+    });
 });
 
-app.get('/db_url_mapping', function(req, res){
+app.get('/db_url_mapping', (req, res) => {
 	dbInterface_url_mapping.getAll({
 		transformValFunc: null,
 		excludeKey: []
-	}, function(instance){
+	}).then(function(instance){
 		res.json(instance);
 	});
 });
@@ -338,7 +336,7 @@ app.get('/db_word_mapping', function(req, res){
 	dbInterface_word_mapping.getAll({
 		transformValFunc: null,
 		excludeKey: []
-	}, function(instance){
+	}).then(function(instance){
 		res.json(instance);
 	});
 });
@@ -351,7 +349,7 @@ app.get('/db_forward', function(req, res){
 	dbInterface_forward.getAll({
 		transformValFunc: stringToArr,
 		excludeKey: []
-	}, function(instance){
+	}).then(function(instance){
 		res.json(instance);
 	});
 });
@@ -378,7 +376,7 @@ app.get('/db_inverted', function(req, res){
 	dbInterface_inverted.getAll({
 		transformValFunc: invertedToArr,
 		excludeKey: []
-	}, function(instance){
+	}).then(function(instance){
 		res.json(instance);
 	});
 });
@@ -391,7 +389,7 @@ app.get('/db_info', function(req, res){
 	dbInterface_info.getAll({
 		transformValFunc: stringToArr,
 		excludeKey: []
-	}, function(instance){
+	}).then(function(instance){
 		res.json(instance);
 	});
 });
@@ -404,7 +402,7 @@ app.get('/db_parent_child', function(req, res){
 	dbInterface_parent_child.getAll({
 		transformValFunc: stringToArr,
 		excludeKey: []
-	}, function(instance){
+	}).then(function(instance){
 		res.json(instance);
 	});
 });
@@ -442,20 +440,20 @@ app.get('/spider_result', function(req, res){
 	dbInterface_info.getAll({
 		transformValFunc: stringToArr,
 		excludeKey: []
-	}, function(urls){
+	}).then(function(urls){
 		dbInterface_url_mapping.getAll({
 			transformValFunc: stringToArr,
 			excludeKey: []
-		}, function(url_mappings){
+		}).then(function(url_mappings){
 			url_mappings = Object.keys(url_mappings).sort(function(a,b){return parseInt(url_mappings[a])-parseInt(url_mappings[b])});
 			dbInterface_parent_child.getAll({
 				transformValFunc: stringToArr,
 				excludeKey: []
-			}, function(children){
+			}).then(function(children){
 				dbInterface_inverted.getAll({
 					transformValFunc: stringToArr,
 					excludeKey: []
-				}, function(inverted){
+				}).then(function(inverted){
 					Object.keys(urls).forEach(function(url_key){
 						if(url_mappings[url_key]){
 							spider_contents = spider_contents + generateSpiderEntry({
