@@ -166,9 +166,16 @@ function queryParse(string) {
 	return [others, phrases]
 }
 
+function dotProduct(a,b) {
+	return a.map(function(x,i) {
+		return a[i] * b[i];
+	}).reduce(function(m,n) { return m + n; });
+}
+
 exports.DbInterface = DbInterface;
 exports.wordsToStemmed = wordsToStemmed;
 exports.wordsToPosTable = wordsToPosTable;
 exports.stringToArr = stringToArr;
 exports.invertedToArr = invertedToArr;
 exports.queryParse = queryParse;
+exports.dotProduct = dotProduct;

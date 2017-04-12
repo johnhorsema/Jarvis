@@ -13,8 +13,9 @@ var invertedToArr = require('./utils').invertedToArr;
 var wordsToStemmed = require('./utils').wordsToStemmed;
 var wordsToPosTable = require('./utils').wordsToPosTable;
 var queryParse = require('./utils').queryParse;
+var dotProduct = require('./utils').dotProduct;
 
-let URL_LIMIT = 30;
+let URL_LIMIT = 5;
 
 // Database Configuration
 
@@ -183,6 +184,9 @@ app.get('/scrape', function(req, res){
 					}
 				});
 				return buildPromiseChain(idx+1, promiseChain);
+			}).catch(() => {
+				promiseChain.splice(idx, 1);
+				return buildPromiseChain(idx+1, promiseChain);
 			});
 		}
 	}
@@ -314,7 +318,7 @@ app.get('/scrape', function(req, res){
 
 app.get('/query', (req, res) => {
 	// Step 1: Convert query to tf*idf scores
-	var sample_query = 'analysis of region';
+	var sample_query = 'art contribution';
 	var stemmed_query = wordsToStemmed(queryParse(sample_query)[0]);
 
 	function getQueryTf(query, word){
@@ -336,12 +340,95 @@ app.get('/query', (req, res) => {
 		});
 	}
 
-	Promise.all(stemmed_query.map(function(word){
-		return getIdfPromise(word);
-	})).then(function(idfResult){
-		res.json(idfResult.map(function(idf){
-			return idf.data*getQueryTf(stemmed_query,idf.word);
-		}));
+	function getQueryToTfidf(){
+		return Promise.all(stemmed_query.map(function(word){
+			return getIdfPromise(word);
+		})).then(function(idfResult){
+			return idfResult.map(function(idf){
+				return idf.data*getQueryTf(stemmed_query,idf.word);
+			});
+		});
+	}
+
+	// Step 2: Convert documents to tf*idf scores
+	function getTfPromise(word, docId){
+		return Promise.all([dbInterface_inverted.get(word), dbInterface_info.get(docId)]).then(function(result){
+			var inverted = result[0];
+			var info = result[1];
+
+			var notFound = {word: word, data: 0};
+			if(inverted === false){
+				return notFound;
+			}
+
+			var docs = invertedToArr(inverted);
+			docs = docs.reduce(function(result, item) {
+				var key = Object.keys(item)[0]; //first property: a, b, c
+				result[key] = item[key];
+				return result;
+			}, {});
+			var docLength = parseInt(stringToArr(info)[3]);
+			var occurence = 0;
+
+			if(docs.hasOwnProperty(docId)){
+				occurence = docs[docId].length;
+			}
+			if(docLength>0){
+				occurence/=docLength;
+			}
+
+			return {word: word, data: occurence};
+		});
+	}
+
+	// docId is used
+	function getDocsToTf(){
+		return dbInterface_forward.getAll({
+			transformValFunc: stringToArr,
+			excludeKey: []
+		}).then(function(urls){
+			return Promise.all(Object.keys(urls).map(function(docId){
+				return Promise.all(stemmed_query.map(function(word){
+					return getTfPromise(word, docId);
+				})).then(function(tfs){
+					return tfs.map(function(tf){
+						return tf.data;
+					});
+				});
+			}));
+		});
+	}
+
+	// here docId is not used
+	function getDocsToIdf(){
+		return dbInterface_forward.getAll({
+			transformValFunc: stringToArr,
+			excludeKey: []
+		}).then(function(urls){
+			return Promise.all(Object.keys(urls).map(function(docId){
+				return Promise.all(stemmed_query.map(function(word){
+					return getIdfPromise(word);
+				})).then(function(idfs){
+					return idfs.map(function(idf){
+						return idf.data;
+					});
+				});
+			}));
+		});
+	}
+
+	function getDocsTfidf(){
+		return Promise.all([getDocsToTf(), getDocsToIdf()]).then(function(result){
+			var tfidfs = result[0].map(function(tfs, idx){
+				return dotProduct(tfs, result[1][idx])
+			});
+			return tfidfs;
+		});
+	}
+
+	// Step 3: Calculate Cosine similarity and return top 50
+	Promise.all([getQueryToTfidf(), getDocsTfidf()]).then(function(result){
+		res.json(result);
 	});
 });
 
