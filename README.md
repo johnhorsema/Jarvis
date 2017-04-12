@@ -1,4 +1,4 @@
-This is a NodeJS scraper with basic functionality.
+This is a NodeJS web crawler with basic functionality.
 Stemmer used [porter-stemmer](https://github.com/jedp/porter-stemmer).
 Index data stored in key-value storage using [LevelDB](https://github.com/Level/levelup).
 Front visuals using Bootstrap.
@@ -14,7 +14,7 @@ npm start
 ```
 To destroy the database
 ```
-npm run cleardb
+node cleardb
 ```
 
 ## Completed
@@ -24,12 +24,12 @@ npm run cleardb
 - Stemming words
 - Front-end (input box)
 - Generate Freq Table
-- Save index into database
-- Update index
+- Defined index structure (mapping, foward, inverted, parent_child etc.)
+- Save indexes into database
+- Accept query and return tf*idf score
 
 ## TODO
-- Define index structure
-
+- Generate tf*idf for all documents according to query
 
 ## Diary
 - Followed this [tutorial](https://scotch.io/tutorials/scraping-the-web-with-node-js)
