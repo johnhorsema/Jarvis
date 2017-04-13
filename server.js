@@ -440,6 +440,61 @@ app.get('/query', (req, res) => {
 		}
 		res.json(raw.sort(compare));
 	});
+
+	var arrOptions = {
+		transformValFunc: stringToArr,
+		excludeKey: []
+	};
+	var invertedOptions = {
+		transformValFunc: invertedToArr,
+		excludeKey: []
+	};
+
+	Promise.all([
+		dbInterface_url_mapping.getAll(arrOptions),
+		dbInterface_info.getAll(arrOptions),
+		dbInterface_forward.getAll(arrOptions),
+		dbInterface_inverted.getAll(invertedOptions),
+		dbInterface_parent_child.getAll(arrOptions)
+
+	]).then((result) => {
+		var urls = Object.keys(result[0]);
+		var info = result[1];
+		var forward = result[2];
+		var inverted = result[3];
+		var children = result[4];
+		var spider_contents = "";
+
+		function forwardToFreq(words, docId){
+			if(words[0]===''){
+				return null;
+			}
+			var freqObj = {};
+			words.forEach((word) => {
+				var freqArr = arrToObj(inverted[word]);
+				freqObj[word] = freqArr[docId].length;
+			});
+			return freqObj;
+		}
+
+		urls.forEach(function(url){
+			var url_key = result[0][url];
+			spider_contents = spider_contents + generateSpiderEntry({
+				meta: {
+					title: info[url_key][0],
+					date: info[url_key][1],
+					size: info[url_key][2]
+				},
+				url: url,
+				keywordsFreq: forwardToFreq(forward[url_key], url_key),
+				childLinks: children[url_key]
+			});
+		});
+		res.send(spider_contents);
+		// res.set({"Content-Disposition":"attachment; filename=\"spider_result.txt\""});
+		// res.send(spider_contents);
+	});
+
 });
 
 app.get('/db_url_mapping', (req, res) => {

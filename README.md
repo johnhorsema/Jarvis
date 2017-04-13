@@ -34,3 +34,4 @@ node cleardb
 ## Diary
 - Followed this [tutorial](https://scotch.io/tutorials/scraping-the-web-with-node-js)
 - Followed this [guide](https://blog.yld.io/2016/10/24/node-js-databases-an-embedded-database-using-leveldb/#.WLbx6GR94y4) for using LevelDB
+- Followed this [post](https://janav.wordpress.com/2013/10/27/tf-idf-and-cosine-similarity/) for tf*idf ideas
