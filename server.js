@@ -14,8 +14,12 @@ var wordsToStemmed = require('./utils').wordsToStemmed;
 var wordsToPosTable = require('./utils').wordsToPosTable;
 var queryParse = require('./utils').queryParse;
 var dotProduct = require('./utils').dotProduct;
+var arrProduct = require('./utils').arrProduct;
+var magnitude = require('./utils').magnitude;
+var arrToObj = require('./utils').arrToObj;
 
 let URL_LIMIT = 5;
+let QUERY_LIMIT = 50;
 
 // Database Configuration
 
@@ -46,7 +50,7 @@ app.get('/admin', function(req, res){
 	res.sendFile(path.join(__dirname + '/public/app/index.html'));
 });
 
-app.get('/spider', function(req, res){
+app.get('/spider', function(req, res){	
 	function generateSpiderEntry(inputs) {
 		var title = inputs.meta.title;
 		var url = inputs.url;
@@ -70,7 +74,7 @@ app.get('/spider', function(req, res){
 		return result.join('\n');
 	}
 
-	var dbOptions = {
+	var arrOptions = {
 		transformValFunc: stringToArr,
 		excludeKey: []
 	};
@@ -80,40 +84,34 @@ app.get('/spider', function(req, res){
 	};
 
 	Promise.all([
-		dbInterface_url_mapping.getAll(dbOptions),
-		dbInterface_info.getAll(dbOptions),
-		dbInterface_forward.getAll(dbOptions),
+		dbInterface_url_mapping.getAll(arrOptions),
+		dbInterface_info.getAll(arrOptions),
+		dbInterface_forward.getAll(arrOptions),
 		dbInterface_inverted.getAll(invertedOptions),
-		dbInterface_parent_child.getAll(dbOptions)
+		dbInterface_parent_child.getAll(arrOptions)
 
 	]).then((result) => {
-		var url_mapping = Object.keys(result[0]).sort(function(a,b){return parseInt(result[0][a])-parseInt(result[0][b])});
+		var urls = Object.keys(result[0]);
 		var info = result[1];
 		var forward = result[2];
 		var inverted = result[3];
 		var children = result[4];
 		var spider_contents = "";
 
-		var url_count = 0;
-		url_mapping.forEach(function(url){
-			var url_key = result[0][url];
-			function generateKeywordsFreq(url_id) {
-				var arr = {};
-				forward[url_id].forEach(function(kw){
-					var occurence = 1;
-					inverted[kw].forEach(function(docs){
-						if(docs[url_key] === undefined){
-							occurence = 0;
-						}
-						else{
-							occurence = docs[url_key].length;
-						}
-					});
-					arr[kw] = occurence;
-				});
-				return arr;
+		function forwardToFreq(words, docId){
+			if(words[0]===''){
+				return null;
 			}
+			var freqObj = {};
+			words.forEach((word) => {
+				var freqArr = arrToObj(inverted[word]);
+				freqObj[word] = freqArr[docId].length;
+			});
+			return freqObj;
+		}
 
+		urls.forEach(function(url){
+			var url_key = result[0][url];
 			spider_contents = spider_contents + generateSpiderEntry({
 				meta: {
 					title: info[url_key][0],
@@ -121,17 +119,13 @@ app.get('/spider', function(req, res){
 					size: info[url_key][2]
 				},
 				url: url,
-				keywordsFreq: generateKeywordsFreq(url_key),
+				keywordsFreq: forwardToFreq(forward[url_key], url_key),
 				childLinks: children[url_key]
 			});
-			url_count++;
-			if(url_count == url_mapping.length){
-				// console.log(spider_contents);
-				// res.send();
-				res.set({"Content-Disposition":"attachment; filename=\"spider_result.txt\""});
-				res.send(spider_contents);
-			}
 		});
+		res.send(spider_contents);
+		// res.set({"Content-Disposition":"attachment; filename=\"spider_result.txt\""});
+		// res.send(spider_contents);
 	});
 });
 
@@ -362,11 +356,8 @@ app.get('/query', (req, res) => {
 			}
 
 			var docs = invertedToArr(inverted);
-			docs = docs.reduce(function(result, item) {
-				var key = Object.keys(item)[0]; //first property: a, b, c
-				result[key] = item[key];
-				return result;
-			}, {});
+			// Convert arr to object, keys are unique
+			docs = arrToObj(docs);
 			var docLength = parseInt(stringToArr(info)[3]);
 			var occurence = 0;
 
@@ -381,7 +372,7 @@ app.get('/query', (req, res) => {
 		});
 	}
 
-	// docId is used
+	// docId used
 	function getDocsToTf(){
 		return dbInterface_forward.getAll({
 			transformValFunc: stringToArr,
@@ -399,7 +390,7 @@ app.get('/query', (req, res) => {
 		});
 	}
 
-	// here docId is not used
+	// docId not used
 	function getDocsToIdf(){
 		return dbInterface_forward.getAll({
 			transformValFunc: stringToArr,
@@ -417,18 +408,37 @@ app.get('/query', (req, res) => {
 		});
 	}
 
-	function getDocsTfidf(){
+	function getDocsToTfidf(){
 		return Promise.all([getDocsToTf(), getDocsToIdf()]).then(function(result){
 			var tfidfs = result[0].map(function(tfs, idx){
-				return dotProduct(tfs, result[1][idx])
+				return arrProduct(tfs, result[1][idx]);
 			});
 			return tfidfs;
 		});
 	}
 
-	// Step 3: Calculate Cosine similarity and return top 50
-	Promise.all([getQueryToTfidf(), getDocsTfidf()]).then(function(result){
-		res.json(result);
+	// Step 3: Calculate Cosine similarity
+	function cosineSimilarity(query, doc){
+		return dotProduct(query, doc)/magnitude(query)*magnitude(doc);
+	}
+
+	// Comparison function to sort scores
+	function compare(a,b) {
+		if (a.score < b.score)
+			return 1;
+		if (a.score > b.score)
+			return -1;
+		return 0;
+	}
+
+	Promise.all([getQueryToTfidf(), getDocsToTfidf()]).then(function(result){
+		var raw = result[1].map(function(doc, idx){
+			return {key: idx, score: cosineSimilarity(result[0],doc)};
+		});
+		if(raw.length>50){
+			raw = raw.splice(0,QUERY_LIMIT);
+		}
+		res.json(raw.sort(compare));
 	});
 });
 

@@ -24,8 +24,18 @@ angular.module('myApp', [
 })
 .controller('HomeCtrl', function($scope, $route, $routeParams, $location, $http) {
 	this.url = 'www.cse.ust.hk';
-	this.data = null;
 	var self = this;
+	$http({
+		method: 'GET',
+		url: '/db_url_mapping'
+	}).then(function successCallback(response) {
+	// this callback will be called asynchronously
+	// when the response is available
+		self.pages = Object.keys(response.data).length;
+	}, function errorCallback(response) {
+		// called asynchronously if an error occurs
+		// or server returns response with an error status.
+	});
 })
 .controller('DbCtrl', function($scope, $route, $routeParams, $location, $http) {
 	this.welcomeMsg = 'Welcome to the Admin.';
@@ -132,7 +142,6 @@ angular.module('myApp', [
         $rootScope.title = current.$$route.title;
         // Redirect Angular route to express route
         if(current.$$route.originalPath=='/scrape'){
-        	console.log($window);
         	$window.location.href = '/scrape';
         }
     });

@@ -172,6 +172,25 @@ function dotProduct(a,b) {
 	}).reduce(function(m,n) { return m + n; });
 }
 
+function arrProduct(a,b) {
+	return a.map(function(x,i) {
+		return a[i]*b[i];
+	});
+}
+
+function magnitude(v){
+	return Math.sqrt(v.reduce(function(a,b){
+		return Math.pow(a,2)+Math.pow(b,2);
+	}));
+}
+
+function arrToObj(arr){
+	return arr.reduce(function(result, item) {
+		var key = Object.keys(item)[0];
+		result[key] = item[key];
+		return result;
+	}, {});
+}
 exports.DbInterface = DbInterface;
 exports.wordsToStemmed = wordsToStemmed;
 exports.wordsToPosTable = wordsToPosTable;
@@ -179,3 +198,6 @@ exports.stringToArr = stringToArr;
 exports.invertedToArr = invertedToArr;
 exports.queryParse = queryParse;
 exports.dotProduct = dotProduct;
+exports.arrProduct = arrProduct;
+exports.magnitude = magnitude;
+exports.arrToObj = arrToObj;
