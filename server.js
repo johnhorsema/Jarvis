@@ -18,7 +18,7 @@ var arrProduct = require('./utils').arrProduct;
 var magnitude = require('./utils').magnitude;
 var arrToObj = require('./utils').arrToObj;
 
-let URL_LIMIT = 5;
+let URL_LIMIT = 300;
 let QUERY_LIMIT = 50;
 
 // Database Configuration
@@ -50,7 +50,7 @@ app.get('/admin', function(req, res){
 	res.sendFile(path.join(__dirname + '/public/app/index.html'));
 });
 
-app.get('/spider', function(req, res){	
+app.get('/spider', function(req, res){
 	function generateSpiderEntry(inputs) {
 		var title = inputs.meta.title;
 		var url = inputs.url;
@@ -122,38 +122,59 @@ app.get('/spider', function(req, res){
 				keywordsFreq: forwardToFreq(forward[url_key], url_key),
 				childLinks: children[url_key]
 			});
+			spider_buffer.push({
+				meta: {
+					title: info[url_key][0],
+					date: info[url_key][1],
+					size: info[url_key][2]
+				},
+				url: url,
+				keywordsFreq: forwardToFreq(forward[url_key], url_key),
+				childLinks: children[url_key],
+				key: parseInt(url_key[0])
+			})
 		});
-		res.send(spider_contents);
+		res.send(spider_buffer);
 		// res.set({"Content-Disposition":"attachment; filename=\"spider_result.txt\""});
 		// res.send(spider_contents);
 	});
 });
 
 app.get('/scrape', function(req, res){
-	function collectInternalLinks(response) {
-		var allRelativeLinks = [];
-		var allAbsoluteLinks = [];
+	// function collectInternalLinks(response) {
+	// 	var allRelativeLinks = [];
+	// 	var allAbsoluteLinks = [];
+	//
+	// 	var relativeLinks = response.$("a[href^='/']");
+	// 	relativeLinks.each(function() {
+	// 	allRelativeLinks.push(response.$(this).attr('href'));
+	//
+	// 	});
+	//
+	// 	var absoluteLinks = response.$("a[href^='http']");
+	// 	absoluteLinks.each(function() {
+	// 		var link = response.$(this).attr('href');
+	// 		// Remove trailing slash
+	// 		link = link.replace(/\/$/, "");
+	// 		// Remove ?XXX segments
+	// 		link = link.replace(/\?(.*?)$/, "");
+	// 		allAbsoluteLinks.push(link);
+	// 	});
+	//
+	// 	// Unique links
+	// 	allAbsoluteLinks = Array.from(new Set(allAbsoluteLinks));
+	//
+	// 	return [allRelativeLinks, allAbsoluteLinks];
+	// }
+	function collectLinks(response) {
+		var links = response.$("a");
+		var allLinks = [];
 
-		var relativeLinks = response.$("a[href^='/']");
-		relativeLinks.each(function() {
-		allRelativeLinks.push(response.$(this).attr('href'));
-
+		links.each(function() {
+			var link = "https://course.cse.ust.hk/comp4321/labs/TestPages/" + response.$(this).attr('href');
+			allLinks.push(link)
 		});
-
-		var absoluteLinks = response.$("a[href^='http']");
-		absoluteLinks.each(function() {
-			var link = response.$(this).attr('href');
-			// Remove trailing slash
-			link = link.replace(/\/$/, "");
-			// Remove ?XXX segments
-			link = link.replace(/\?(.*?)$/, "");
-			allAbsoluteLinks.push(link);
-		});
-
-		// Unique links
-		allAbsoluteLinks = Array.from(new Set(allAbsoluteLinks));
-
-		return [allRelativeLinks, allAbsoluteLinks];
+		return allLinks;
 	}
 
 	function buildPromiseChain(idx, promiseChain) {
@@ -170,8 +191,8 @@ app.get('/scrape', function(req, res){
 			};
 
 			return rp(options).then((response) => {
-				var links = collectInternalLinks(response)[1];
-				
+				var links = collectLinks(response);
+
 				links.forEach(function(link){
 					if(promiseChain.length < URL_LIMIT && promiseChain.indexOf(link)==-1){
 						promiseChain.push(link);
@@ -233,7 +254,7 @@ app.get('/scrape', function(req, res){
 	            }
 
 				var words = collectWords(response);
-				
+
 				if(words === null){
 					words = [];
 				}
@@ -241,7 +262,7 @@ app.get('/scrape', function(req, res){
 				var posTable = wordsToPosTable(words);
 
 				dbInterface_url_mapping.replace(url, url_id).then(function(){
-					var links = collectInternalLinks(response)[1];
+					var links = collectLinks(response);
 					dbInterface_parent_child.replace(url_id, links).then(function(){
 						// Add page info
 						// Url ID -> Info
@@ -275,7 +296,7 @@ app.get('/scrape', function(req, res){
 							});
 						});
 					});
-					
+
 				});
 			});
 		});
@@ -299,7 +320,7 @@ app.get('/scrape', function(req, res){
 	res.send('Check console for progress/result.');
 
 	// The URL we will scrape from
-    var ROOT = 'http://www.cse.ust.hk';
+    var ROOT = 'https://course.cse.ust.hk/comp4321/labs/TestPages/testpage.htm';
     console.log('Scrape started...');
     buildPromiseChain(0, [ROOT]).then((result)=>{
     	console.log(result.length+' links found.');
