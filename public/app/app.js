@@ -42,6 +42,12 @@ angular.module('myApp', [
 		// or server returns response with an error status.
 	});
 
+  this.resetSearch = function() {
+    this.queryProcessed = false;
+    this.queryResults = null;
+    this.query = "";
+  }
+
   this.submitQuery = function() {
     if(this.query==""){
       return;

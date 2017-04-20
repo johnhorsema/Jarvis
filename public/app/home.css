@@ -48,6 +48,25 @@ body { padding-top: 100px; }
 	background-image: url(https://material.io/icons/webcomponents/custom_components/material-io-nav/static/images/icons_light.svg);
 }
 
+.jarvis.pulse {
+    animation-name: pulse_animation;
+    animation-duration: 1800ms;
+    transform-origin: 50% 50%;
+    animation-iteration-count: infinite;
+    animation-timing-function: linear;
+}
+
+@keyframes pulse_animation {
+	0% { transform: scale(1); }
+	30% { transform: scale(1); }
+	40% { transform: scale(1); }
+	50% { transform: scale(1.08); }
+	60% { transform: scale(1.05); }
+	70% { transform: scale(1.02); }
+	80% { transform: scale(1); }
+	100% { transform: scale(1); }
+}
+
 .jarvis-text {
 	color: #2979ff;
 }
@@ -56,4 +75,23 @@ body { padding-top: 100px; }
 	position: absolute;
 	top: 1em;
 	right: 1em;
+}
+
+.st-scroll {
+	top: 0;
+	left: 0;
+	transition: all 0.6s ease-in-out;
+
+	/* Let's enforce some hardware acceleration */
+	-webkit-transform: translate3d(0, 0, 0);
+	-webkit-backface-visibility: hidden;
+}
+
+.st-scroll-apply {
+	transform: translateY(-100%);
+}
+
+.back-button {
+	position: fixed;
+	left: 43%;
 }
