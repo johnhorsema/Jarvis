@@ -23,7 +23,9 @@ angular.module('myApp', [
 
 })
 .controller('HomeCtrl', function($scope, $route, $routeParams, $location, $http) {
-	this.url = 'www.cse.ust.hk';
+  this.query = '';
+  this.queryProcessed = false;
+
 	var self = this;
 	$http({
 		method: 'GET',
@@ -32,10 +34,47 @@ angular.module('myApp', [
 	// this callback will be called asynchronously
 	// when the response is available
 		self.pages = Object.keys(response.data).length;
+    self.url = Object.keys(response.data).filter(function(key){
+      return response.data[key]=="0";
+    })[0];
 	}, function errorCallback(response) {
 		// called asynchronously if an error occurs
 		// or server returns response with an error status.
 	});
+
+  this.submitQuery = function() {
+    if(this.query==""){
+      return;
+    }
+    this.queryProcessed = true;
+    this.queryResults = null;
+    $http.post('/query', {query: this.query}).then(function successCallback(response) {
+  	// this callback will be called asynchronously
+  	// when the response is available
+      var query_scores = response.data.filter(function(item){
+        return item.score>0;
+      });
+      $http({
+        method: 'GET',
+        url: '/spider'
+      }).then(function successCallback(response) {
+      // this callback will be called asynchronously
+      // when the response is available
+        var result_pages = response.data.filter(function(item, idx) {
+          return query_scores.map(function(qitem){return qitem.key}).indexOf(item.key)!=-1;
+          // return item.key==query_result[idx].key;
+        });
+        self.queryResults = result_pages;
+      }, function errorCallback(response) {
+        // called asynchronously if an error occurs
+        // or server returns response with an error status.
+      });
+  		// console.log(response.data)
+  	}, function errorCallback(response) {
+  		// called asynchronously if an error occurs
+  		// or server returns response with an error status.
+  	});
+  }
 })
 .controller('DbCtrl', function($scope, $route, $routeParams, $location, $http) {
 	this.welcomeMsg = 'Welcome to the Admin.';

@@ -1,4 +1,5 @@
 var express = require('express');
+var bodyParser = require('body-parser');
 var path = require('path');
 var request = require('request');
 var rp = require('request-promise');
@@ -40,6 +41,7 @@ var dbInterface_inverted = DbInterface({db: mydb_inverted});
 var dbInterface_info = DbInterface({db: mydb_info});
 var dbInterface_parent_child = DbInterface({db: mydb_parent_child});
 
+app.use(bodyParser());
 app.use('/static', express.static(__dirname + '/public'));
 
 app.get('/', function(req, res){
@@ -97,6 +99,7 @@ app.get('/spider', function(req, res){
 		var inverted = result[3];
 		var children = result[4];
 		var spider_contents = "";
+		var spider_buffer = [];
 
 		function forwardToFreq(words, docId){
 			if(words[0]===''){
@@ -132,7 +135,7 @@ app.get('/spider', function(req, res){
 				keywordsFreq: forwardToFreq(forward[url_key], url_key),
 				childLinks: children[url_key],
 				key: parseInt(url_key[0])
-			})
+			});
 		});
 		res.send(spider_buffer);
 		// res.set({"Content-Disposition":"attachment; filename=\"spider_result.txt\""});
@@ -331,9 +334,9 @@ app.get('/scrape', function(req, res){
     });
 });
 
-app.get('/query', (req, res) => {
+app.post('/query', (req, res) => {
 	// Step 1: Convert query to tf*idf scores
-	var sample_query = 'art contribution';
+	var sample_query = req.body.query;
 	var stemmed_query = wordsToStemmed(queryParse(sample_query)[0]);
 
 	function getQueryTf(query, word){
@@ -460,60 +463,6 @@ app.get('/query', (req, res) => {
 			raw = raw.splice(0,QUERY_LIMIT);
 		}
 		res.json(raw.sort(compare));
-	});
-
-	var arrOptions = {
-		transformValFunc: stringToArr,
-		excludeKey: []
-	};
-	var invertedOptions = {
-		transformValFunc: invertedToArr,
-		excludeKey: []
-	};
-
-	Promise.all([
-		dbInterface_url_mapping.getAll(arrOptions),
-		dbInterface_info.getAll(arrOptions),
-		dbInterface_forward.getAll(arrOptions),
-		dbInterface_inverted.getAll(invertedOptions),
-		dbInterface_parent_child.getAll(arrOptions)
-
-	]).then((result) => {
-		var urls = Object.keys(result[0]);
-		var info = result[1];
-		var forward = result[2];
-		var inverted = result[3];
-		var children = result[4];
-		var spider_contents = "";
-
-		function forwardToFreq(words, docId){
-			if(words[0]===''){
-				return null;
-			}
-			var freqObj = {};
-			words.forEach((word) => {
-				var freqArr = arrToObj(inverted[word]);
-				freqObj[word] = freqArr[docId].length;
-			});
-			return freqObj;
-		}
-
-		urls.forEach(function(url){
-			var url_key = result[0][url];
-			spider_contents = spider_contents + generateSpiderEntry({
-				meta: {
-					title: info[url_key][0],
-					date: info[url_key][1],
-					size: info[url_key][2]
-				},
-				url: url,
-				keywordsFreq: forwardToFreq(forward[url_key], url_key),
-				childLinks: children[url_key]
-			});
-		});
-		res.send(spider_contents);
-		// res.set({"Content-Disposition":"attachment; filename=\"spider_result.txt\""});
-		// res.send(spider_contents);
 	});
 
 });

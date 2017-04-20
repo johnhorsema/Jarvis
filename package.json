@@ -9,6 +9,7 @@
   },
   "author": "johnhorsema",
   "dependencies": {
+    "body-parser": "^1.17.1",
     "cheerio": "latest",
     "express": "latest",
     "level": "^1.6.0",
