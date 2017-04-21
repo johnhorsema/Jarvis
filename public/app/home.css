@@ -31,6 +31,12 @@ body { padding-top: 100px; }
 	border-color: #3bb3e8;
 }
 
+.navbar-button:disabled {
+	border: transparent;
+	background-color: #cccccc;
+	color: #dddddd;
+}
+
 .jarvis-container {
 	margin: 0;
 	width: 100%;
