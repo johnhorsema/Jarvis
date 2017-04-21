@@ -341,7 +341,7 @@ app.post('/query', (req, res) => {
 
 	function getQueryTf(query, word){
 		var counts = {};
-		for(var i = 0; i< query.length; i++) {
+		for(var i = 0; i < query.length; i++) {
 		    var num = query[i];
 		    counts[num] = counts[num] ? counts[num]+1 : 1;
 		}
@@ -455,16 +455,82 @@ app.post('/query', (req, res) => {
 		return 0;
 	}
 
-	Promise.all([getQueryToTfidf(), getDocsToTfidf()]).then(function(result){
-		var raw = result[1].map(function(doc, idx){
-			return {key: idx, score: cosineSimilarity(result[0],doc)};
-		});
-		if(raw.length>50){
-			raw = raw.splice(0,QUERY_LIMIT);
-		}
-		res.json(raw.sort(compare));
-	});
+	// Get all pages and info
+	var arrOptions = {
+		transformValFunc: stringToArr,
+		excludeKey: []
+	};
+	var invertedOptions = {
+		transformValFunc: invertedToArr,
+		excludeKey: []
+	};
 
+	Promise.all([
+		dbInterface_url_mapping.getAll(arrOptions),
+		dbInterface_info.getAll(arrOptions),
+		dbInterface_forward.getAll(arrOptions),
+		dbInterface_inverted.getAll(invertedOptions),
+		dbInterface_parent_child.getAll(arrOptions),
+		getQueryToTfidf(),
+		getDocsToTfidf()
+	]).then((result) => {
+		var getUrl = function(val) {
+			return Object.keys(result[0]).filter(function(url){
+				return result[0][url]==val;
+			})[0];
+		};
+		var info = result[1];
+		var forward = result[2];
+		var inverted = result[3];
+		var children = result[4];
+		var scoreResult = [result[5],result[6]];
+		// Case where term is not found in all documents
+		if(scoreResult[0].length==0){
+			res.json([]);
+		}
+
+		function forwardToFreq(words, docId){
+			if(words[0]===''){
+				return null;
+			}
+			var freqObj = {};
+			words.forEach((word) => {
+				var freqArr = arrToObj(inverted[word]);
+				freqObj[word] = freqArr[docId].length;
+			});
+			return freqObj;
+		}
+
+		// idx is the url key
+		var rawScore = scoreResult[1].map(function(doc, idx){
+			return {key: idx, score: cosineSimilarity(scoreResult[0],doc)};
+		});
+		// Remove zero scores
+		rawScore = rawScore.filter(function(item, idx){
+			return item.score>0;
+		});
+		// Sort in descending order
+		rawScore.sort(compare);
+		if(rawScore.length>QUERY_LIMIT){
+			rawScore = rawScore.splice(0,QUERY_LIMIT);
+		}
+		
+		var query_result = rawScore.map(function(qres){
+			var url_key = qres.key;
+			return {
+				meta: {
+					title: info[url_key][0],
+					date: info[url_key][1],
+					size: info[url_key][2]
+				},
+				url: getUrl(url_key),
+				keywordsFreq: forwardToFreq(forward[url_key], url_key),
+				childLinks: children[url_key],
+				score: qres.score
+			};
+		});
+		res.json(query_result);
+	});
 });
 
 app.get('/db_url_mapping', (req, res) => {

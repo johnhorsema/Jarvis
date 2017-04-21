@@ -3,7 +3,21 @@
 angular.module('myApp', [
   'ngRoute',
   'ngAnimate'
-]).config(function($routeProvider, $locationProvider) {
+])
+.factory('logTimeTaken', [function() {  
+    var logTimeTaken = {
+        request: function(config) {
+            config.requestTimestamp = new Date().getTime();
+            return config;
+        },
+        response: function(response) {
+            response.config.responseTimestamp = new Date().getTime();
+            return response;
+        }
+    };
+    return logTimeTaken;
+}])
+.config(function($routeProvider, $locationProvider, $httpProvider) {
     $routeProvider.when('/', {
         templateUrl: '/static/app/home.html',
         controller: 'HomeCtrl as ctrl',
@@ -21,10 +35,12 @@ angular.module('myApp', [
 
 	$locationProvider.html5Mode(true);
 
+	$httpProvider.interceptors.push('logTimeTaken');
 })
 .controller('HomeCtrl', function($scope, $route, $routeParams, $location, $http) {
   this.query = '';
   this.queryProcessed = false;
+  this.timeElapsed = 0;
 
 	var self = this;
 	$http({
@@ -46,6 +62,7 @@ angular.module('myApp', [
     this.queryProcessed = false;
     this.queryResults = null;
     this.query = "";
+    this.timeElapsed = 0;
   }
 
   this.submitQuery = function() {
@@ -57,28 +74,13 @@ angular.module('myApp', [
     $http.post('/query', {query: this.query}).then(function successCallback(response) {
   	// this callback will be called asynchronously
   	// when the response is available
-      var query_scores = response.data.filter(function(item){
-        return item.score>0;
-      });
-      $http({
-        method: 'GET',
-        url: '/spider'
-      }).then(function successCallback(response) {
-      // this callback will be called asynchronously
-      // when the response is available
-        var result_pages = response.data.filter(function(item, idx) {
-          return query_scores.map(function(qitem){return qitem.key}).indexOf(item.key)!=-1;
-          // return item.key==query_result[idx].key;
-        });
-        self.queryResults = result_pages;
-      }, function errorCallback(response) {
-        // called asynchronously if an error occurs
-        // or server returns response with an error status.
-      });
+      self.queryResults = response.data;
+      self.timeElapsed = response.config.responseTimestamp - response.config.requestTimestamp;
   		// console.log(response.data)
   	}, function errorCallback(response) {
   		// called asynchronously if an error occurs
   		// or server returns response with an error status.
+  		self.queryResults[0] = {title: 'Something has gone wrong.'}
   	});
   }
 })

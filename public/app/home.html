@@ -11,10 +11,7 @@
           <div class="jarvis pulse"></div>
       </div>
   </div>
-  <div class="row text-center">
-      <h4>Searching from <a href="http://{{ctrl.url}}">[{{ctrl.url||'-BLANK-'}}]</a>. {{ctrl.pages||0}} page(s) searchable.</h4>
-  </div>
-  <div class="row">
+  <div class="row query-result">
       <div class="container">
         <input class="navbar-input col-xs-11" type="" placeholder="No data available. Head to /scrape for data." ng-show="ctrl.url==null" disabled>
         <input class="navbar-input col-xs-11" type="" placeholder="Type keywords to search" name="query" ng-model="ctrl.query" ng-hide="ctrl.url==null">
@@ -34,15 +31,35 @@
     <center>I didn't choose the engineering life. The engineering life chose me.</center>
   </div>
 
-  <div class="row" ng-show="ctrl.queryResults.length!=null">
+  <div class="row query-result" ng-show="ctrl.queryResults.length!=null">
     <div class="back-button">
       <a href="" class="btn btn-sm btn-default" ng-click="ctrl.resetSearch()">
           <span class="glyphicon glyphicon-menu-down" aria-hidden="true"></span>
           New Search
       </a>
     </div>
-    <h2>Results</h2>
-    <div ng-repeat="item in ctrl.queryResults">{{item.url}}</div>
+    <div class="result-msg">{{ctrl.queryResults.length}} results ({{ctrl.timeElapsed/1000}} seconds)</div>
+    <table class="table table-responsive borderless">
+      <tbody>
+        <tr ng-repeat="item in ctrl.queryResults">
+          <td class="score-col">{{item.score}}</td>
+          <td>
+            <div><a class="title" href="{{item.url}}">{{item.meta.title}}</a></div>
+            <div class="cite">{{item.url}}</div>
+            <div>{{item.meta.date}} - {{item.meta.size}}</div>
+            <div>
+              <span ng-repeat="(word,freq) in item.keywordsFreq">{{word}} {{freq}}; </span>
+            </div>
+            <div ng-repeat="childLink in item.childLinks track by $index">
+              <a href="{{childLink}}">{{childLink}}</a>
+            </div>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="row text-center result-msg query-result" ng-show="ctrl.queryResults.length==null">
+      {{ctrl.pages||0}} page(s) searchable from <a href="http://{{ctrl.url}}">{{ctrl.url||'-BLANK-'}}</a>
   </div>
 </div>
 

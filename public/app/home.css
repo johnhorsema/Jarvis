@@ -94,10 +94,35 @@ body { padding-top: 100px; }
 }
 
 .st-scroll-apply {
-	transform: translateY(-100%);
+	transform: translateY(-58vh);
 }
 
 .back-button {
 	position: fixed;
 	left: 43%;
+}
+
+.cite {
+	color: #006621;
+	font-size: 14px;
+}
+
+table a.title{
+	font-size: 18px;
+}
+
+table a:visited{
+	color: #609;
+}
+
+.score-col{
+	margin-right: 20px;
+}
+
+.result-msg {
+	color: #808080;
+}
+
+.query-result {
+	padding-top: 2em;
 }
