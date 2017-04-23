@@ -21,6 +21,7 @@ var arrToObj = require('./utils').arrToObj;
 
 let URL_LIMIT = 300;
 let QUERY_LIMIT = 50;
+let TITLE_MATCH_WEIGHT = 2;
 
 // Database Configuration
 
@@ -501,14 +502,28 @@ app.post('/query', (req, res) => {
 			return freqObj;
 		}
 
+		// To set the titleMatchBonus, a weight is set for the final bonus
+		function titleMatchBonus(query, title){
+			return TITLE_MATCH_WEIGHT*query.reduce(function(a, b){
+				var _a = title.indexOf(a)!=-1 ? 1 : 0;
+				var _b = title.indexOf(b)!=-1 ? 1 : 0;
+				return _a + _b;
+			}, 0);
+		}
+
 		// idx is the url key
+		// add the title match bonus
 		var rawScore = scoreResult[1].map(function(doc, idx){
-			return {key: idx, score: cosineSimilarity(scoreResult[0],doc)};
+			var titleMatchBonus_score = titleMatchBonus(stemmed_query, wordsToStemmed(info[idx][0].toLowerCase().split(' ')));
+			var result = {key: idx, score: cosineSimilarity(scoreResult[0],doc) + titleMatchBonus_score};
+			return result;
 		});
+
 		// Remove zero scores
 		rawScore = rawScore.filter(function(item, idx){
-			return item.score>0;
+			return item.score > 0;
 		});
+
 		// Sort in descending order
 		rawScore.sort(compare);
 		if(rawScore.length>QUERY_LIMIT){

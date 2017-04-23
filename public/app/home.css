@@ -107,6 +107,10 @@ body { padding-top: 100px; }
 	font-size: 14px;
 }
 
+table a{
+	color: rgb(41, 121, 255)
+}
+
 table a.title{
 	font-size: 18px;
 }
