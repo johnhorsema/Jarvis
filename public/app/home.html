@@ -14,7 +14,7 @@
   <div class="row query-result">
       <div class="container">
         <input class="navbar-input col-xs-11" type="" placeholder="No data available. Head to /scrape for data." ng-show="ctrl.url==null" disabled>
-        <input class="navbar-input col-xs-11" type="" placeholder="Type keywords to search" name="query" ng-model="ctrl.query" ng-hide="ctrl.url==null">
+        <input class="navbar-input col-xs-11" type="" placeholder="Type keywords to search" name="query" ng-model="ctrl.query" ng-hide="ctrl.url==null" ng-keyup="$event.keyCode == 13 && ctrl.submitQuery()">
         <button class="navbar-button col-xs-1" ng-click="ctrl.submitQuery()" ng-disabled="ctrl.url==null">
           <span class="glyphicon glyphicon-search"></span>
         </button>

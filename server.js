@@ -21,7 +21,7 @@ var arrToObj = require('./utils').arrToObj;
 
 let URL_LIMIT = 300;
 let QUERY_LIMIT = 50;
-let TITLE_MATCH_WEIGHT = 2;
+let TITLE_MATCH_WEIGHT = 1;
 
 // Database Configuration
 
@@ -508,7 +508,7 @@ app.post('/query', (req, res) => {
 				var _a = title.indexOf(a)!=-1 ? 1 : 0;
 				var _b = title.indexOf(b)!=-1 ? 1 : 0;
 				return _a + _b;
-			}, 0);
+			}, TITLE_MATCH_WEIGHT);
 		}
 
 		// idx is the url key
