@@ -129,4 +129,3 @@ assert.deepEqual([
 1/99*(1+Math.log(4/3)),
 3/97*(1+Math.log(4/3))
 ],result_q)
-

@@ -18,6 +18,7 @@ var dotProduct = require('./utils').dotProduct;
 var arrProduct = require('./utils').arrProduct;
 var magnitude = require('./utils').magnitude;
 var arrToObj = require('./utils').arrToObj;
+var arraySum = require('./utils').arraySum;
 
 let URL_LIMIT = 300;
 let QUERY_LIMIT = 50;
@@ -346,7 +347,11 @@ app.post('/query', (req, res) => {
 		    var num = query[i];
 		    counts[num] = counts[num] ? counts[num]+1 : 1;
 		}
-		return counts[word]/query.length;
+		var sum = query.length;
+		if(req.body.phrase_query!=null){
+			sum+=1;
+		}
+		return counts[word]/sum;
 	}
 
 	function getIdfPromise(word){
@@ -466,6 +471,77 @@ app.post('/query', (req, res) => {
 		excludeKey: []
 	};
 
+	// The object containing functions to process phrased queries
+	var processPhrase = {
+		init: function(){
+			if(req.body.phrase_query.length==0){
+				return [[],[]];
+			}
+			stemmed_phrase_query = wordsToStemmed(queryParse(req.body.phrase_query)[0]);
+			return [this.getPhraseQueryToTfidf(stemmed_phrase_query), this.getPhraseDocsToTfidf(stemmed_phrase_query)];
+		},
+		getPhraseQueryIdf: function(phrase_query_split){
+			return 1 + Math.log(1/(req.body.query.split(' ').length+1));
+		},
+		getPhraseTf: function(phrase){
+			function findDiffOne(a,b){
+				function extractValue(object){
+					return object[Object.keys(object)[0]];
+				}
+
+				a = extractValue(a);
+				b = extractValue(b);
+
+			  var num = 0;
+			  a.forEach(function(aitem){
+			    b.forEach(function(bitem){
+			      if(Math.abs(aitem-bitem)==1){
+			        num++;
+			      }
+			    });
+			  });
+			  return num;
+			}
+
+			return Promise.all([dbInterface_url_mapping.getAll(arrOptions), dbInterface_inverted.getAll(invertedOptions)]).then((result) => {
+				var mappings = result[0];
+				var pos_info = result[1];
+				return Object.keys(mappings).map(function(url_string){
+					var url_key = mappings[url_string];
+					return phrase.reduce(function(a, b){
+						// Need to satisfy one condition
+						// 1. Both exist on same page
+						// return number of pairs of abs(pos_0, pos_1)
+						if(pos_info[a][url_key]==undefined || pos_info[b][url_key]==undefined){
+							return {data: 0, docId: url_key};
+						}
+						return {data: findDiffOne(pos_info[a][url_key],pos_info[b][url_key]), docId: url_key};
+					});
+				});
+			});
+		},
+		getPhraseQueryToTfidf: function(phrase){
+				return [1*this.getPhraseQueryIdf(phrase)];
+		},
+		getPhraseDocsToTfidf: function(phrase){
+			return Promise.all([this.getPhraseTf(phrase), dbInterface_info.getAll(arrOptions)]).then((result)=>{
+				var tfResult = result[0];
+				var getPageLength = function(id){
+					return result[1][id][3];
+				};
+				var tfresNonZeroNum = tfResult.filter(function(tf){
+				  return tf.data>0;
+				}).length;
+
+				return tfResult.map(function(tf){
+					var TF = tf.data/(getPageLength(tf.docId)-Math.pow(Math.max(1,tf.data),stemmed_phrase_query.length-1));
+					var IDF = 1+Math.log(tfResult.length/tfresNonZeroNum);
+					return TF * IDF;
+				});
+			});
+		}
+	};
+
 	Promise.all([
 		dbInterface_url_mapping.getAll(arrOptions),
 		dbInterface_info.getAll(arrOptions),
@@ -474,17 +550,19 @@ app.post('/query', (req, res) => {
 		dbInterface_parent_child.getAll(arrOptions),
 		getQueryToTfidf(),
 		getDocsToTfidf()
-	]).then((result) => {
+	].concat(processPhrase.init())).then((result) => {
 		var getUrl = function(val) {
 			return Object.keys(result[0]).filter(function(url){
-				return result[0][url]==val;
+				return result[0][url] == val;
 			})[0];
 		};
+
 		var info = result[1];
 		var forward = result[2];
 		var inverted = result[3];
 		var children = result[4];
-		var scoreResult = [result[5],result[6]];
+		var scoreResult = [result[5],result[6]]
+
 		// Case where term is not found in all documents
 		if(scoreResult[0].length==0){
 			res.json([]);
@@ -511,6 +589,9 @@ app.post('/query', (req, res) => {
 			}, TITLE_MATCH_WEIGHT);
 		}
 
+		// TWO cases to calculate the score
+
+		// Case 1: normal query
 		// idx is the url key
 		// add the title match bonus
 		var rawScore = scoreResult[1].map(function(doc, idx){
@@ -518,6 +599,20 @@ app.post('/query', (req, res) => {
 			var result = {key: idx, score: cosineSimilarity(scoreResult[0],doc) + titleMatchBonus_score};
 			return result;
 		});
+
+		// Case 2: phrase query
+		if(result[7].length>0 && result[8].length>0){
+			var phraseScore = result[8].map(function(doc, idx){
+					var titleMatchPhraseBonus_score = titleMatchBonus([wordsToStemmed(queryParse(req.body.phrase_query)[0]).join(' ')], wordsToStemmed(info[idx][0].toLowerCase().split(' ')).join(' '));
+					var phrase_result = {key: idx, score: cosineSimilarity(result[7], [doc])};
+					return phrase_result;
+			});
+			// Add the phrase score to the rawScore
+			rawScore = rawScore.map(function(raw, idx){
+				raw.score = raw.score + phraseScore[idx].score;
+				return raw;
+			});
+		}
 
 		// Remove zero scores
 		rawScore = rawScore.filter(function(item, idx){
@@ -529,7 +624,7 @@ app.post('/query', (req, res) => {
 		if(rawScore.length>QUERY_LIMIT){
 			rawScore = rawScore.splice(0,QUERY_LIMIT);
 		}
-		
+
 		var query_result = rawScore.map(function(qres){
 			var url_key = qres.key;
 			return {

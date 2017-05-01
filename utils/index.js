@@ -37,7 +37,7 @@ var DbInterface = function(options) {
 		if(typeof inputVal === 'string'){
 			inputVal = [].concat(inputVal);
 		}
-		// Check if key exists in db 
+		// Check if key exists in db
 		interface.get(key).then((value) => {
 			// If not exist
 			if(value === false) {
@@ -57,7 +57,7 @@ var DbInterface = function(options) {
 		});
 	};
 	interface.getAll = function(options) {
-		// Method to 
+		// Method to
 		// 1. transform value(s) only when the key is not excluded
 		// 2. return all kv-pairs
 		var transformValFunc = options.transformValFunc;
@@ -191,6 +191,13 @@ function arrToObj(arr){
 		return result;
 	}, {});
 }
+
+function arraySum(a, b){
+	return a.map(function (num, idx) {
+		return num + b[idx];
+	});
+}
+
 exports.DbInterface = DbInterface;
 exports.wordsToStemmed = wordsToStemmed;
 exports.wordsToPosTable = wordsToPosTable;
@@ -201,3 +208,4 @@ exports.dotProduct = dotProduct;
 exports.arrProduct = arrProduct;
 exports.magnitude = magnitude;
 exports.arrToObj = arrToObj;
+exports.arraySum = arraySum;
